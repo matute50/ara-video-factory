@@ -126,7 +126,7 @@ def generate_multi_clip_901(article_data: dict) -> dict:
     proj_name_a = f"{prefix}_phaseA"
     r_img = _run_flow([
         "image",
-        "--prompt", c.get("volanta_zocalo", "") + " - periodista femenino profesional, vertical 9:16, estudio luminoso",
+        "--prompt", c.get("volanta_zocalo", "") + " - periodista femenino profesional, vertical 9:16, exterior urbano soleado",
         "--ratio", "9:16",
         "--model", "Nano Banana 2 Lite",
         "--count", "1",
@@ -189,7 +189,7 @@ def generate_multi_clip_901(article_data: dict) -> dict:
     # Phase C: Extract a PNG frame from clip1 to serve as visual anchor for clip2
     # Using PNG instead of .mp4 avoids the upload_frame 90s timeout on video files
     print(f"[MultiClip] Phase C: extracting frame from clip1 → {clip1_ref_png}")
-    ok_frame = extract_frame_from_video(clip1_mp4, clip1_ref_png, timestamp_sec=0.0)
+    ok_frame = extract_frame_from_video(clip1_mp4, clip1_ref_png, timestamp_sec=7.9)
     if not ok_frame or not Path(clip1_ref_png).exists():
         print("[MultiClip] ⚠️ Frame extraction failed, falling back to ref.png for clip2")
         clip2_start = ref_png

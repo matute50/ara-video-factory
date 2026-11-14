@@ -161,7 +161,9 @@ def assemble_prompts(
         f"Vertical 9:16. Close-up medio de {persona_marker}, tercio superior-medio, mirando directamente a cámara. "
         f"{lighting}. {vestimenta_note}. "
         f"{imagen_refs}"
-        f"Ambiente urbano céntrico de ciudad argentina mediana, luz natural, fotografía periodística."
+        f"Ambiente urbano exterior, escena real callejera de ciudad argentina mediana, "
+        f"luz natural, fotografía periodística. NO estudio, NO fondo neutro, "
+        f"sin carteles ni letreros con texto visible en la escena."
     )
 
     # ---- Prompt VIDEO (Veo 3.1, <120 palabras) ----
@@ -174,6 +176,9 @@ def assemble_prompts(
         f"Expressive style: initial={expresion_inicio}; development={expresion_desarrollo}; closing={expresion_cierre}; "
         f"body_language={lenguaje_corporal}; camera_rhythm={ritmo_camara}"
     )
+    # Restricción explícita: sin estudio, sin carteles con texto en la escena generada
+    scene_constraint = "Scene is an outdoor real street setting, NEVER a studio set; NO visible text signs, posters, or graphics."
+    visual_direction += f"; {scene_constraint}"
     audio_block = f"[Fondo: {ambiente_sonoro}]"
     prompt_veo = f"{dialogo_bracket}; {visual_direction}; {audio_block}"
 
@@ -200,7 +205,10 @@ def assemble_prompts(
 
     # Prohibir texto/carteles en video — verificar que ninguna palabra prohibida
     # aparezca fuera de los corchetes del diálogo o del bloque [Fondo:]
-    forbidden_video_text = {"texto", "título", "cartel", "gráfico", "letra", "subtitle", "overlay"}
+    forbidden_video_text = {
+        "texto", "título", "cartel", "gráfico", "letra", "subtitle", "overlay",
+        "banner", "titular", "lead-in", "on-screen", "text overlay",
+    }
     # Extraer solo el texto fuera de corchetes para chequeo
     outside = re.sub(r'\[[^\]]*\]', ' ', prompt_veo)
     for word in forbidden_video_text:
@@ -300,7 +308,9 @@ def assemble_prompts_multi_clip(
         f"Vertical 9:16. Close-up medio de {persona_marker}, tercio superior-medio, mirando directamente a cámara. "
         f"{lighting}. {vestimenta_note}. "
         f"{imagen_refs}"
-        f"Ambiente urbano céntrico de ciudad argentina mediana, luz natural, fotografía periodística."
+        f"Ambiente urbano exterior, escena real callejera de ciudad argentina mediana, "
+        f"luz natural, fotografía periodística. NO estudio, NO fondo neutro, "
+        f"sin carteles ni letreros con texto visible en la escena."
     )
 
     # Determinar qué secciones usar
@@ -357,6 +367,9 @@ def assemble_prompts_multi_clip(
             f"Expressive style: initial={expresion_inicio}; development={expresion_desarrollo}; closing={cierre_desc}; "
             f"body_language={lenguaje_corporal}; camera_rhythm={ritmo_camara}"
         )
+        # Restricción explícita: sin estudio, sin carteles con texto en la escena generada
+        scene_constraint = "Scene is an outdoor real street setting, NEVER a studio set; NO visible text signs, posters, or graphics."
+        visual_direction += f"; {scene_constraint}"
         audio_block = f"[Fondo: {ambiente_sonoro}]"
 
         # Nota de continuidad para clips posteriores: forzar identidad visual
