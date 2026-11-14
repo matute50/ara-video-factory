@@ -67,36 +67,37 @@ def status_check() -> dict:
 def generate_batch_json(job: FlowJob) -> dict:
     """
     Genera el payload JSON para flow.py batch.
-    Encadena imagen → video con start_from=<imagen_result>.
-    Usa --start flag cuando hay imagen previa.
+    Encadena imagen → video con start=<imagen_result>.
+    Estructura compatible con examples/guion_ejemplo.json de google-flow-skill.
     """
-    batch_entry = {
-        "prompt_imagen": job.prompt_imagen,
-        "model": "Nano Banana Pro",
-        "aspect_ratio": "9:16",
-        "negative_prompt": "low quality, blurry, distorted faces, extra limbs",
-    }
-    video_entry = {
-        "prompt": job.prompt_veo,
-        "model": VIDEO_MODEL,
-        "duration": 8,
-        "aspect_ratio": "9:16",
-        "start_from_image": True,  # usar imagen generada como frame inicial
-    }
     return {
         "project": PROJECT_NAME,
-        "entries": [batch_entry, video_entry],
-        "metadata": {
-            "job_id": job.job_id,
-            "article_id": job.article_id,
-            "created_at": datetime.utcnow().isoformat(),
+        "defaults": {
+            "ratio": "9:16",
+            "image_model": "Nano Banana Pro",
+            "video_model": VIDEO_MODEL,
         },
+        "jobs": [
+            {
+                "type": "image",
+                "name": f"img_{job.article_id}_frame",
+                "prompt": job.prompt_imagen,
+            },
+            {
+                "type": "video",
+                "name": f"vid_{job.article_id}_clip",
+                "start": f"img_{job.article_id}_frame",
+                "prompt": job.prompt_veo,
+            },
+        ],
     }
 
 
 def write_batch_json(payload: dict, output_path: Optional[str] = None) -> str:
     """Escribe el payload JSON en un archivo temporal."""
-    path = output_path or str(OUTPUT_BASE / f"batch_job_{payload['metadata']['job_id']}.json")
+    # Compatibilidad con formato nuevo (jobs) y viejo (entries + metadata)
+    job_id = payload.get("metadata", {}).get("job_id", 0)
+    path = output_path or str(OUTPUT_BASE / f"batch_job_{job_id}.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
     return path
@@ -109,21 +110,23 @@ def dry_run_batch(batch_payload: dict) -> dict:
     print(f"[FlowBridge DRY-RUN] Project: {PROJECT_NAME}")
     print(f"[FlowBridge DRY-RUN] Video model: {VIDEO_MODEL}")
     print(f"[FlowBridge DRY-RUN] Duración objetivo: 8s")
-    print(f"[FlowBridge DRY-RUN] Entries: {len(batch_payload['entries'])}")
+    print(f"[FlowBridge DRY-RUN] Entries: {len(batch_payload['jobs'])}")
     print("\n─── PROMPT IMAGEN ───")
-    print(batch_payload["entries"][0]["prompt_imagen"])
+    img_job = next(j for j in batch_payload["jobs"] if j["type"] == "image")
+    print(img_job["prompt"])
     print("\n─── PROMPT VIDEO ───")
-    print(batch_payload["entries"][1]["prompt"])
+    vid_job = next(j for j in batch_payload["jobs"] if j["type"] == "video")
+    print(vid_job["prompt"])
     print(f"\n─── RESUMEN ───")
-    print(f"Word count prompt_veo: {len(batch_payload['entries'][1]['prompt'].split())}")
+    print(f"Word count prompt_veo: {len(vid_job['prompt'].split())}")
     return {
         "dry_run": True,
         "batch_file": batch_file,
         "project": PROJECT_NAME,
-        "entries_count": len(batch_payload["entries"]),
+        "entries_count": len(batch_payload["jobs"]),
         "video_model": VIDEO_MODEL,
-        "image_prompt_wordcount": len(batch_payload["entries"][0]["prompt_imagen"].split()),
-        "video_prompt_wordcount": len(batch_payload["entries"][1]["prompt"].split()),
+        "image_prompt_wordcount": len(img_job["prompt"].split()),
+        "video_prompt_wordcount": len(vid_job["prompt"].split()),
         "status": "ready_for_real_run_if_login_active",
     }
 
@@ -131,7 +134,7 @@ def dry_run_batch(batch_payload: dict) -> dict:
 def run_live_batch(batch_file: str) -> dict:
     """Ejecuta flow.py batch real (consume créditos)."""
     try:
-        cmd = ["python3", str(FLOW_SCRIPT), "batch", "--input", batch_file]
+        cmd = ["python3", str(FLOW_SCRIPT), "batch", batch_file]
         print(f"[FlowBridge] Ejecutando: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         return {

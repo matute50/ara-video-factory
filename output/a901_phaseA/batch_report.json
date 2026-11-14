@@ -1,0 +1,26 @@
+[
+  {
+    "name": "a901_clip1",
+    "type": "video",
+    "file": "/home/matias/ara-video-factory/output/a901_phaseA/a901_clip1.mp4",
+    "ok": true,
+    "submitted": true,
+    "frames": [
+      {
+        "slot": "initial",
+        "file": "/home/matias/ara-video-factory/output/a901_phaseA/a901_ref.png",
+        "asset_id": "51cb69f9-235e-4627-acd7-bf868b6fa6fa"
+      }
+    ],
+    "asset_id": "ANqvLOZcPYjO3XneucDwrHj-SelK9KDwoBalDllnO9MUQfbBQGIaeWIZaoIgySFJuaN-y5t_P87gb6bnK4JGloeEJBOhAm6zsTRORY9Q4c8wLEZssIViAIKX0OPZ4o4-ZhNlIzYeflUck5KCjxtW33o3YWxZRWuJ48o1A5aV68aW"
+  },
+  {
+    "name": "a901_clip2",
+    "type": "video",
+    "file": "/home/matias/ara-video-factory/output/a901_phaseA/a901_clip2.mp4",
+    "ok": true,
+    "submitted": true,
+    "frames": [],
+    "asset_id": "ANqvLOaEVr-DmJ6lf_3i6oM8fR25x7tLaFzbxH4mjhzeL11EJblmkSyx5yJiBILUCIFp6ud4BjQafUKHfaKlTiInv1wqkD_JCJftdnkBUm2gOu6F3hN1PRxPq6YvjN_eFrjAw0Qq5yAKu01ZAZyYhjcvkjsReyOusUqDp1qVbwiZ"
+  }
+]

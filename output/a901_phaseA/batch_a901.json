@@ -1,0 +1,20 @@
+{
+  "project": "a901_phaseA",
+  "defaults": {
+    "ratio": "9:16",
+    "video_model": "Veo 3.1 - Lite"
+  },
+  "jobs": [
+    {
+      "type": "video",
+      "name": "a901_clip1",
+      "prompt": "[El personaje dice \"El municipio de Saladillo instaló nuevos nomencladores en las principales esquinas del centro urbano.\", femenina joven, tono claro cálido y expresivo, español argentino rioplatense, sincronización labial precisa]; Expressive style: initial=Mirá fija al lente con leve asentimiento inicial, expresión abierta y cercana; development=mano visible de forma controlada, expresa datos con seriedad contenida, mantiene contacto visual constante; closing=mano visible de forma controlada, expresa datos con seriedad contenida, mantiene contacto visual constante; body_language=postura_firme_contenida; camera_rhythm=micro_acercamiento_suave; [Fondo: Sonido de calle céntrica de Saladillo acorde al tenor, volumen bajo o muy bajo]",
+      "start": "a901_ref.png"
+    },
+    {
+      "type": "video",
+      "name": "a901_clip2",
+      "prompt": "[El personaje dice \"La medida busca mejorar la orientación de vecinos y turistas. Las placas tienen diseño moderno. Toda la información en Saladillo Vivo.\", femenina joven, tono claro cálido y expresivo, español argentino rioplatense, sincronización labial precisa]; Expressive style: initial=Mirá fija al lente con leve asentimiento inicial, expresión abierta y cercana; development=mano visible de forma controlada, expresa datos con seriedad contenida, mantiene contacto visual constante; closing=Despedida con leve asentimiento sereno, mantiene la mirada al lente antes de cerrar; body_language=postura_firme_contenida; camera_rhythm=micro_acercamiento_suave; [Fondo: Sonido de calle céntrica de Saladillo acorde al tenor, volumen bajo o muy bajo]"
+    }
+  ]
+}

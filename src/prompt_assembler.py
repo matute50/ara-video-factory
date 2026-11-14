@@ -165,7 +165,7 @@ def assemble_prompts(
     )
 
     # ---- Prompt VIDEO (Veo 3.1, <120 palabras) ----
-    dialogue_bracket = (
+    dialogo_bracket = (
         f'[El personaje dice "{guion}", {tono_vocal_raw or "voz femenina clara y profesional"}, sincronización labial precisa]'
         if not FLOW_USE_CHARACTER
         else f'[@Ara dice "{guion}", {tono_vocal_raw or "voz femenina clara y profesional"}, sincronización labial precisa]'
@@ -175,13 +175,13 @@ def assemble_prompts(
         f"body_language={lenguaje_corporal}; camera_rhythm={ritmo_camara}"
     )
     audio_block = f"[Fondo: {ambiente_sonoro}]"
-    prompt_veo = f"{dialogue_bracket}; {visual_direction}; {audio_block}"
+    prompt_veo = f"{dialogo_bracket}; {visual_direction}; {audio_block}"
 
     # Verificación crítica: menos de 120 palabras
     wc = _word_count(prompt_veo)
     if wc > 120:
         # Truncar la dirección visual manteniendo diálogo + fondo
-        available = 120 - _word_count(dialogue_bracket) - _word_count(audio_block) - 2
+        available = 120 - _word_count(dialogo_bracket) - _word_count(audio_block) - 2
         parts = visual_direction.split("; ")
         truncated_parts = []
         count = 0
@@ -192,7 +192,7 @@ def assemble_prompts(
             truncated_parts.append(part)
             count += pc + 1
         condensed_visual = "; ".join(truncated_parts)
-        prompt_veo = f"{dialogue_bracket}; {condensed_visual}; {audio_block}"
+        prompt_veo = f"{dialogo_bracket}; {condensed_visual}; {audio_block}"
         wc = _word_count(prompt_veo)
 
     if wc > 120:
@@ -218,7 +218,7 @@ def assemble_prompts(
             "tenor": tenor,
             "persona_explicitly_male": persona_explicitly_male,
             "allow_smile": permit_smile,
-            "dialogue_bracket_length": len(dialogue_bracket),
+            "dialogo_bracket_length": len(dialogo_bracket),
         },
     }
 
@@ -359,9 +359,13 @@ def assemble_prompts_multi_clip(
         )
         audio_block = f"[Fondo: {ambiente_sonoro}]"
 
-        # Nota de continuidad para clips posteriores
+        # Nota de continuidad para clips posteriores: forzar identidad visual
         if idx > 0:
-            continuity = "The character continues speaking naturally, maintaining identical appearance and background."
+            continuity = (
+                "Keep EXACTLY the same character face, outfit, hair, skin tone, "
+                "and background scene from the previous clip — only change lip movement "
+                "and facial expression to match the new dialogue."
+            )
             visual_direction += f"; continuity:{continuity}"
 
         prompt_veo = f"{dialogo_bracket}; {visual_direction}; {audio_block}"
@@ -369,7 +373,7 @@ def assemble_prompts_multi_clip(
         # Verificación crítica: menos de 120 palabras
         wc = _word_count(prompt_veo)
         if wc > 120:
-            available = 120 - _word_count(dialogue_bracket) - _word_count(audio_block) - 2
+            available = 120 - _word_count(dialogo_bracket) - _word_count(audio_block) - 2
             parts = visual_direction.split("; ")
             truncated_parts = []
             count = 0
@@ -380,7 +384,7 @@ def assemble_prompts_multi_clip(
                 truncated_parts.append(part)
                 count += pc + 1
             condensed_visual = "; ".join(truncated_parts)
-            prompt_veo = f"{dialogue_bracket}; {condensed_visual}; {audio_block}"
+            prompt_veo = f"{dialogo_bracket}; {condensed_visual}; {audio_block}"
             wc = _word_count(prompt_veo)
 
         valid = len(errors) == 0
@@ -395,6 +399,70 @@ def assemble_prompts_multi_clip(
 
     return results
 
+
+def build_batch_json_for_multi_clip(
+    ara_json_input,
+    n_clips: int = 2,
+    duracion_por_clip: float = 8.0,
+    project_name: str = "",
+) -> dict:
+    """
+    Construye el JSON de batch para flow.py con encadenamiento de continuidad.
+
+    Cada clip posterior apunta al output del anterior mediante 'start':
+      job_2.start = job_1.name + '.mp4'
+
+    Retorna un dict compatible con la estructura que espera flow.py batch:
+    {
+      "project": "<name>",
+      "defaults": {"ratio": "9:16", "video_model": "Veo 3.1 - Lite"},
+      "jobs": [
+        {"type":"video","name":"<id>_clip1","prompt":"...","image":null},
+        {"type":"video","name":"<id>_clip2","prompt":"...","start":"<id>_clip1.mp4"},
+      ]
+    }
+    """
+    import time
+    prompts = assemble_prompts_multi_clip(
+        ara_json_input, n_clips=n_clips, duracion_por_clip=duracion_por_clip
+    )
+    if not prompts:
+        raise ValueError("No se generaron prompts para ningún clip")
+
+    # Extraer id único del ara_json (si existe) o timestamp
+    raw_id = None
+    try:
+        parsed = ara_json_input if isinstance(ara_json_input, dict) else json.loads(ara_json_input)
+        c = parsed.get("contenido", {})
+        raw_id = c.get("article_id") or c.get("id")
+    except Exception:
+        pass
+    if not raw_id:
+        raw_id = f"batch_{int(time.time())}"
+
+    safe_id = re.sub(r"[^A-Za-z0-9_-]", "_", str(raw_id))
+    prefix = project_name or safe_id
+
+    jobs = []
+    prev_name = None
+    for p in prompts:
+        job = {
+            "type": "video",
+            "name": f"{prefix}_clip{p['clip_index']}",
+            "prompt": p["prompt_veo"],
+        }
+        if prev_name:
+            # El segundo clip y siguientes apuntan al video anterior como frame inicial
+            job["start"] = f"{prefix}_clip{p['clip_index'] - 1}.mp4"
+        # Note: 'image' field is only consumed by image-type jobs; video jobs ignore it.
+        # Visual identity is enforced via the prompt and continuity directive above.
+        jobs.append(job)
+
+    return {
+        "project": prefix,
+        "defaults": {"ratio": "9:16", "video_model": "Veo 3.1 - Lite"},
+        "jobs": jobs,
+    }
 
 
     import argparse

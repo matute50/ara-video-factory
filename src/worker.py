@@ -21,7 +21,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")  # .env del factory
 from src.prompt_assembler import assemble_prompts
 from src.flow_bridge import (
     FlowJob, check_skill_ready, dry_run_batch, generate_batch_json,
-    run_live_batch, wait_cooldown, OUTPUT_BASE,
+    run_live_batch, wait_cooldown, OUTPUT_BASE, SKILL_DIR, PROJECT_NAME,
 )
 from src.ffmpeg_composer import process_video as compose_video
 from src.telegram_notifier import QCPayload, send_qc_request, notify_batch_complete
@@ -220,25 +220,61 @@ def _process_live(storage: StorageAgent, job_id: int, article_id: int,
 
     wait_cooldown()
 
+    # Leer batch_report.json generado por flow.py
+    project_dir = SKILL_DIR / "outputs" / PROJECT_NAME
+    report_path = project_dir / "batch_report.json"
+    batch_report = None
+    raw_video_path = None
+    if report_path.exists():
+        try:
+            batch_report = json.loads(report_path.read_text())
+        except Exception as e:
+            print(f"[Worker] Error leyendo batch_report: {e}")
+
+    # Determinar video crudo: usar el generado por Flow si existe, sino mock
+    for entry in (batch_report or []):
+        if entry.get("type") == "video" and entry.get("file"):
+            raw_video_path = entry["file"]
+            break
+
+    if not raw_video_path or not Path(raw_video_path).exists():
+        print("[Worker] Video crudo de Flow no encontrado, usando testsrc como fallback.")
+        raw_video_path = str(OUTPUT_BASE / f"testsrc_{article_id}.mp4")
+        if not Path(raw_video_path).exists():
+            import subprocess
+            subprocess.run([
+                "ffmpeg", "-y", "-f", "lavfi", "-i",
+                f"testsrc2=size=1920x1080:duration=8:rate=30",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", raw_video_path
+            ], capture_output=True)
+
     output_path = str(OUTPUT_BASE / f"output_{article_id}_final.mp4")
-    mock_raw = str(OUTPUT_BASE / f"testsrc_{article_id}.mp4")
-    # Generar video sintético como placeholder si no existe
-    if not Path(mock_raw).exists():
-        import subprocess
-        subprocess.run([
-            "ffmpeg", "-y", "-f", "lavfi", "-i",
-            f"testsrc2=size=1920x1080:duration=8:rate=30",
-            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", mock_raw
-        ], capture_output=True)
-    compose_video(mock_raw, output_path,
+    compose_video(raw_video_path, output_path,
                   volanta_text=parsed_ara['contenido']['volanta_zocalo'],
                   titulo_text=parsed_ara['contenido']['titulo_zocalo'])
 
-    update_job_status(storage, job_id,
-                      estado="listo_entregado",
-                      video_final_path=output_path)
+    # Subir a Google Drive (no bloqueante — error se registra pero no falla el job)
+    from src.google_drive_uploader import upload_video_to_drive
+    drive_result = upload_video_to_drive(output_path, article_id, tenor=meta.get('tenor', 'informativo'))
+    drive_ok = drive_result.get("ok", False)
+    drive_url = drive_result.get("remote_url") or ""
+    if not drive_ok:
+        print(f"[Worker] ⚠️ Upload a Drive falló: {drive_result.get('error','')}")
 
-    return {"ok": True, "job_id": job_id, "output_path": output_path}
+    # Actualizar estado y guardar reporte
+    update_job_status(
+        storage, job_id,
+        estado="listo_entregado",
+        video_final_path=output_path,
+        batch_report_json=batch_report,
+        drive_upload_ok=drive_ok,
+        drive_remote_url=drive_url,
+    )
+
+    # Notificar entrega por Telegram
+    notify_batch_complete(1, 1, 0)
+
+    return {"ok": True, "job_id": job_id, "output_path": output_path, "batch_report": batch_report}
 
 
 def main():
