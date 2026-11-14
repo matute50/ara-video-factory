@@ -240,7 +240,8 @@ def generate_multi_clip_901(article_data: dict) -> dict:
     from src.google_drive_uploader import upload_video_to_drive  # noqa: E402
     drive_url = None
     try:
-        drive_url = upload_video_to_drive(final_mp4, title=f"901_{prefix}_final_16s.mp4")
+        drive_result = upload_video_to_drive(final_mp4, article_id=article_id)
+        drive_url = drive_result.get("remote_url")
         print(f"[MultiClip] ✓ Uploaded to Drive: {drive_url}")
     except Exception as e:
         print(f"[MultiClip] ⚠️ Drive upload error: {e}")
