@@ -1,0 +1,13 @@
+ara-video-factory/
+__pycache__/
+*.pyc
+*.pyo
+.env
+.output/**/*.mp4
+output/batch_*.json
+vendor/
+.git/
+*.log
+.pytest_cache/
+.mypy_cache/
+.DS_Store
