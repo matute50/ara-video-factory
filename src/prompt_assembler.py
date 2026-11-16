@@ -134,8 +134,8 @@ def assemble_prompts(
 
     if _word_count(guion) < 14:
         errors.append(f"'guion_ara' muy corto ({_word_count(guion)} palabras, mínimo 14)")
-    elif _word_count(guion) > 25:
-        errors.append(f"'guion_ara' muy largo ({_word_count(guion)} palabras, máximo 25)")
+    elif _word_count(guion) > 45:
+        errors.append(f"'guion_ara' muy largo ({_word_count(guion)} palabras, máximo 45)")
 
     # ---- Prompt IMAGEN (9:16 vertical) ----
     persona_marker = "@Ara" if FLOW_USE_CHARACTER and FLOW_BASE_IMAGE_REF else "periodista femenino profesional"
@@ -152,6 +152,18 @@ def assemble_prompts(
         if tenor in ("sensible_luto", "policial_grave")
         else "vestimenta profesional sobria"
     )
+    logging_cfg = _read_env()
+    flujo_img = logging_cfg.get("SALADILLO_PHOTO_DIR", "./reference_photos/center_saladillo/")
+    # Extraer descripción fija de continuidad visual (look completo del personaje)
+    raw_cv = ""
+    try:
+        parsed_ara = ara_json_input if isinstance(ara_json_input, dict) else json.loads(ara_json_input)
+        raw_cv = (parsed_ara.get("meta_ara") or {}).get("continuidad_visual", "") or ""
+    except Exception:
+        pass
+    # Si no hay descripción fija (v1.0 o agente antiguo), agregar nota genérica
+    if not raw_cv:
+        raw_cv = "Periodista mujer con blazer azul marino sobre blusa blanca, pelo negro recogido, maquillaje natural, iluminacion natural frontal"
     imagen_refs = (
         f"Referencia visual: foto de {persona_marker} combinada con fotos reales del centro de Saladillo ({SALADILLO_PHOTO_DIR}). "
         if FLOW_USE_CHARACTER and FLOW_BASE_IMAGE_REF
@@ -161,6 +173,7 @@ def assemble_prompts(
         f"Vertical 9:16. Close-up medio de {persona_marker}, tercio superior-medio, mirando directamente a cámara. "
         f"{lighting}. {vestimenta_note}. "
         f"{imagen_refs}"
+        f"Look exacto: {raw_cv}. "
         f"Ambiente urbano exterior, escena real callejera de ciudad argentina mediana, "
         f"luz natural, fotografía periodística. NO estudio, NO fondo neutro, "
         f"sin carteles ni letreros con texto visible en la escena."
@@ -238,16 +251,42 @@ def dialogo_or_fondo_safe(word: str) -> bool:
     return False  # Mantener estricto: ninguna de estas va en el prompt general
 
 
-def _extract_section(ara_json_input, field: str, default: str = "") -> str:
-    """Extrae un campo de sección del JSON Ara con fallback a guion completo."""
+def _extract_bloques(ara_json_input) -> list[str]:
+    """Extrae la lista de guiones por bloque de un ara_json v1.1, o fallback a v1.0."""
     try:
         if isinstance(ara_json_input, str):
             parsed = json.loads(ara_json_input)
         else:
             parsed = ara_json_input
-        return parsed.get("contenido", {}).get(field, default) or default
-    except (json.JSONDecodeError, AttributeError, KeyError):
-        return default
+        contenido = parsed.get("contenido", {})
+        # v1.1: bloques es una lista de dicts con 'guion_ara'
+        bloques = contenido.get("bloques", [])
+        if isinstance(bloques, list) and len(bloques) >= 2:
+            return [b["guion_ara"] for b in bloques if isinstance(b, dict) and "guion_ara" in b]
+        # v1.0: secciones individuales
+        sec_a = contenido.get("seccion_a_guion", "")
+        sec_b = contenido.get("seccion_b_guion", "")
+        if sec_a and sec_b:
+            return [sec_a, sec_b]
+        # Fallback al guion completo
+        guion = _extract_guion(ara_json_input)
+        if guion:
+            return [guion]
+    except Exception:
+        pass
+    return []
+
+
+def _extract_continuidad_visual(ara_json_input) -> str:
+    """Extrae continuidad_visual de meta_ara (v1.1) o cadena vacía."""
+    try:
+        if isinstance(ara_json_input, str):
+            parsed = json.loads(ara_json_input)
+        else:
+            parsed = ara_json_input
+        return parsed.get("meta_ara", {}).get("continuidad_visual", "") or ""
+    except Exception:
+        return ""
 
 
 def assemble_prompts_multi_clip(
@@ -304,6 +343,8 @@ def assemble_prompts_multi_clip(
         if FLOW_USE_CHARACTER and FLOW_BASE_IMAGE_REF
         else ""
     )
+    # Nota genérica de look cuando no hay continuidad explícita en meta_ara (v1.0)
+    default_cv = ""
     base_imagen_prompt = (
         f"Vertical 9:16. Close-up medio de {persona_marker}, tercio superior-medio, mirando directamente a cámara. "
         f"{lighting}. {vestimenta_note}. "
@@ -313,30 +354,47 @@ def assemble_prompts_multi_clip(
         f"sin carteles ni letreros con texto visible en la escena."
     )
 
-    # Determinar qué secciones usar
-    sections = []
-    sec_a = _extract_section(ara_json_input, "seccion_a_guion")
-    sec_b = _extract_section(ara_json_input, "seccion_b_guion")
+    # Determinar qué secciones usar (prioridad: v1.1 bloques > v1.0 secciones > guion completo)
+    sections = _extract_bloques(ara_json_input)
     guion_completo = _extract_guion(ara_json_input)
+    continuidad = _extract_continuidad_visual(ara_json_input)
 
-    if n_clips == 2 and sec_a and sec_b:
-        sections = [sec_a, sec_b]
-    elif n_clips == 2 and guion_completo:
-        # Fallback: dividir guion completo en dos mitades
-        all_words = guion_completo.split()
-        mid = max(14, len(all_words) // 2)
-        cut = mid
-        for i in range(mid, len(all_words)):
-            if ' '.join(all_words[:i+1]).rstrip().endswith('.'):
-                cut = i
-                break
-        s1 = ' '.join(all_words[:cut]).rstrip()
-        s2 = ' '.join(all_words[cut:]).rstrip()
-        if not s1.endswith('.'): s1 += '.'
-        if not s2.endswith('.'): s2 += '.'
-        sections = [s1, s2]
+    # Inyectar look completo en el prompt de imagen para CLIP 1 también
+    if not continuidad:
+        default_cv = "Periodista mujer con blazer azul marino sobre blusa blanca, pelo negro recogido, maquillaje natural, iluminacion natural frontal"
     else:
-        sections = [guion_completo]  # Un solo clip como fallback
+        default_cv = continuidad
+    base_imagen_prompt = (
+        f"Vertical 9:16. Close-up medio de {persona_marker}, tercio superior-medio, mirando directamente a cámara. "
+        f"{lighting}. {vestimenta_note}. "
+        f"{imagen_refs}"
+        f"Look exacto: {default_cv}. "
+        f"Ambiente urbano exterior, escena real callejera de ciudad argentina mediana, "
+        f"luz natural, fotografía periodística. NO estudio, NO fondo neutro, "
+        f"sin carteles ni letreros con texto visible en la escena."
+    )
+
+    if not sections and guion_completo:
+        # Fallback: dividir guion completo en n_clips mitades
+        all_words = guion_completo.split()
+        per_clip = max(14, len(all_words) // n_clips)
+        for i in range(n_clips):
+            start = i * per_clip
+            end = min(start + per_clip, len(all_words))
+            s = ' '.join(all_words[start:end]).rstrip()
+            if not s.endswith('.') and end < len(all_words):
+                # Buscar frontera de oración cercana
+                for j in range(end, min(end + 5, len(all_words))):
+                    cand = ' '.join(all_words[start:j+1]).rstrip()
+                    if cand.endswith('.'):
+                        s = cand
+                        end = j + 1
+                        break
+                else:
+                    s += '.'
+            elif not s.endswith('.'):
+                s += '.'
+            sections.append(s)
 
     for idx, seccion_text in enumerate(sections[:n_clips]):
         errors = []
@@ -370,23 +428,33 @@ def assemble_prompts_multi_clip(
         # Restricción explícita: sin estudio, sin carteles con texto en la escena generada
         scene_constraint = "Scene is an outdoor real street setting, NEVER a studio set; NO visible text signs, posters, or graphics."
         visual_direction += f"; {scene_constraint}"
-        audio_block = f"[Fondo: {ambiente_sonoro}]"
 
         # Nota de continuidad para clips posteriores: forzar identidad visual
+        continuity_directive = ""
         if idx > 0:
-            continuity = (
-                "Keep EXACTLY the same character face, outfit, hair, skin tone, "
-                "and background scene from the previous clip — only change lip movement "
-                "and facial expression to match the new dialogue."
-            )
-            visual_direction += f"; continuity:{continuity}"
+            if continuidad:
+                # v1.1: usar la descripción de continuidad fija del meta_ara
+                continuity = (
+                    "Keep EXACTLY the visual continuity described: "
+                    f"{continuidad}. "
+                    "Only change lip movement and facial expression to match the new dialogue."
+                )
+            else:
+                continuity = (
+                    "Keep EXACTLY the same character face, outfit, hair, skin tone, "
+                    "and background scene from the previous clip — only change lip movement "
+                    "and facial expression to match the new dialogue."
+                )
+            continuity_directive = f"; continuity:{continuity}"
 
-        prompt_veo = f"{dialogo_bracket}; {visual_direction}; {audio_block}"
+        audio_block = f"[Fondo: {ambiente_sonoro}]"
+        prompt_veo = f"{dialogo_bracket}; {visual_direction}{continuity_directive}; {audio_block}"
 
         # Verificación crítica: menos de 120 palabras
         wc = _word_count(prompt_veo)
         if wc > 120:
-            available = 120 - _word_count(dialogo_bracket) - _word_count(audio_block) - 2
+            # Preservar la directiva de continuidad (crítica para coherencia visual)
+            available = 120 - _word_count(dialogo_bracket) - _word_count(audio_block) - _word_count(continuity_directive) - 2
             parts = visual_direction.split("; ")
             truncated_parts = []
             count = 0
@@ -397,7 +465,7 @@ def assemble_prompts_multi_clip(
                 truncated_parts.append(part)
                 count += pc + 1
             condensed_visual = "; ".join(truncated_parts)
-            prompt_veo = f"{dialogo_bracket}; {condensed_visual}; {audio_block}"
+            prompt_veo = f"{dialogo_bracket}; {condensed_visual}{continuity_directive}; {audio_block}"
             wc = _word_count(prompt_veo)
 
         valid = len(errors) == 0
@@ -466,10 +534,11 @@ def build_batch_json_for_multi_clip(
         }
         if prev_name:
             # El segundo clip y siguientes apuntan al video anterior como frame inicial
-            job["start"] = f"{prefix}_clip{p['clip_index'] - 1}.mp4"
+            job["start"] = prev_name + ".mp4"
         # Note: 'image' field is only consumed by image-type jobs; video jobs ignore it.
         # Visual identity is enforced via the prompt and continuity directive above.
         jobs.append(job)
+        prev_name = job["name"]
 
     return {
         "project": prefix,

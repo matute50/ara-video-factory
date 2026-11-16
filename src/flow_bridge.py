@@ -114,6 +114,25 @@ def generate_batch_json(job: FlowJob) -> dict:
     }
 
 
+def generate_image_only_json(article_id: int, prompt_imagen: str) -> dict:
+    """Payload de batch para generar SOLO la imagen maestra (sin video)."""
+    return {
+        "project": PROJECT_NAME,
+        "defaults": {
+            "ratio": "9:16",
+            "image_model": IMAGE_MODEL,
+            "video_model": VIDEO_MODEL,
+        },
+        "jobs": [
+            {
+                "type": "image",
+                "name": f"img_{article_id}_frame",
+                "prompt": prompt_imagen,
+            },
+        ],
+    }
+
+
 def write_batch_json(payload: dict, output_path: Optional[str] = None) -> str:
     """Escribe el payload JSON en un archivo temporal."""
     # Compatibilidad con formato nuevo (jobs) y viejo (entries + metadata)

@@ -10,7 +10,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "saladillo-vivo-pro"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from src.prompt_assembler import assemble_prompts, _word_count, _has_smile_word
+from src.prompt_assembler import (
+    assemble_prompts,
+    assemble_prompts_multi_clip,
+    build_batch_json_for_multi_clip,
+    _word_count,
+    _has_smile_word,
+    _extract_bloques,
+    _extract_continuidad_visual,
+)
 
 
 class TestPromptAssembler(unittest.TestCase):
@@ -127,6 +135,88 @@ class TestWordCount(unittest.TestCase):
     def test_multiline(self):
         text = "línea uno\ndos tres cuatro cinco"
         self.assertEqual(_word_count(text), 6)
+
+
+class TestMultiClipV11(unittest.TestCase):
+    """Tests para ensamblaje multi-clip con ara_json v1.1 (bloques)."""
+
+    def _make_v11(self):
+        return {
+            "version": "1.1",
+            "contenido": {
+                "bloques": [
+                    {"orden": 1, "guion_ara": "El municipio instaló nuevos nomencladores en las principales esquinas del centro urbano."},
+                    {"orden": 2, "guion_ara": "La medida busca mejorar la orientación de vecinos. Toda la información en Saladillo Vivo."},
+                ],
+                "guion_ara": "El municipio instaló nuevos nomencladores en las principales esquinas del centro urbano. La medida busca mejorar la orientación de vecinos. Toda la información en Saladillo Vivo.",
+                "volanta_zocalo": "Nomencladores",
+                "titulo_zocalo": "Nuevas placas en esquinas",
+            },
+            "meta_ara": {
+                "tenor": "informativo_servicio",
+                "permitir_sonrisa": True,
+                "tono_vocal": "Voz femenina joven y clara",
+                "ambiente_sonoro": "Sonido de calle céntrica de Saladillo, volumen bajo",
+                "continuidad_visual": "Periodista mujer, pelo negro largo recogido en cola baja, blazer azul marino sobrio, calle céntrica de Saladillo con iluminación diurna",
+            },
+        }
+
+    def test_extract_bloques_v11(self):
+        """Debe extraer bloques del formato v1.1."""
+        ara = self._make_v11()
+        bloques = _extract_bloques(ara)
+        self.assertEqual(len(bloques), 2)
+        self.assertIn("Saladillo Vivo", bloques[1])
+
+    def test_extract_bloques_v10(self):
+        """Debe hacer fallback a secciones v1.0."""
+        ara = {
+            "version": "1.0",
+            "contenido": {
+                "guion_ara": "Texto completo de prueba.",
+                "seccion_a_guion": "Primera parte del texto.",
+                "seccion_b_guion": "Segunda parte con cierre en Saladillo Vivo.",
+            },
+            "meta_ara": {},
+        }
+        bloques = _extract_bloques(ara)
+        self.assertEqual(len(bloques), 2)
+        self.assertEqual(bloques[0], "Primera parte del texto.")
+
+    def test_extract_continuidad_visual(self):
+        """Debe extraer continuidad_visual de meta_ara."""
+        ara = self._make_v11()
+        cv = _extract_continuidad_visual(ara)
+        self.assertIn("blazer azul marino", cv)
+        # Sin campo, devuelve vacío
+        ara2 = {"meta_ara": {}, "contenido": {}}
+        self.assertEqual(_extract_continuidad_visual(ara2), "")
+
+    def test_multi_clip_v11_generates_prompts(self):
+        """Con v1.1 bloques, debe generar un prompt por clip."""
+        ara = self._make_v11()
+        prompts = assemble_prompts_multi_clip(ara, n_clips=2)
+        self.assertEqual(len(prompts), 2)
+        for p in prompts:
+            self.assertLessEqual(_word_count(p['prompt_veo']), 120,
+                                 f"Clip {p['clip_index']} excede 120 palabras")
+            self.assertTrue(p['valid'], f"Clip {p['clip_index']} inválido: {p['errors']}")
+
+    def test_multi_clip_continuity_uses_v11(self):
+        """El clip 2 debe incluir continuidad_visual de v1.1."""
+        ara = self._make_v11()
+        prompts = assemble_prompts_multi_clip(ara, n_clips=2)
+        clip2 = prompts[1]['prompt_veo']
+        self.assertIn("continuity:", clip2)
+        self.assertIn("blazer azul marino", clip2)
+
+    def test_batch_json_v11(self):
+        """El batch JSON debe encadenar clip2 a clip1."""
+        ara = self._make_v11()
+        batch = build_batch_json_for_multi_clip(ara, n_clips=2, project_name="test_v11")
+        self.assertEqual(len(batch['jobs']), 2)
+        self.assertEqual(batch['jobs'][1]['start'], "test_v11_clip1.mp4")
+        self.assertIsNone(batch['jobs'][0].get('start'))
 
 
 class TestHasSmileWord(unittest.TestCase):

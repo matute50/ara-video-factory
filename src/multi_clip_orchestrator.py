@@ -25,6 +25,25 @@ SKILL_DIR = Path(os.environ.get("FLOW_SKILL_DIR", "/home/matias/.hermes/skills/g
 FLOW_SCRIPT = SKILL_DIR / "flow.py"
 OUTPUT_BASE = FABRIC_DIR / "output"
 
+# Encontrar el mejor python3 disponible (con playwright)
+def _find_python_with_playwright():
+    import glob
+    candidates = (
+        "/home/matias/.hermes/tools/python-*/bin/python3",
+        "/usr/bin/python3.14",
+        "/usr/bin/python3",
+    )
+    for pattern in candidates:
+        matches = glob.glob(pattern)
+        for p in matches:
+            if os.path.isfile(p):
+                r = subprocess.run([p, "-c", "import playwright"], capture_output=True, timeout=5)
+                if r.returncode == 0:
+                    return p
+    return "python3"
+
+_PYTHON_BIN = _find_python_with_playwright()
+
 
 def check_skill_ready() -> tuple[bool, str]:
     if not FLOW_SCRIPT.exists():
@@ -36,7 +55,7 @@ def check_skill_ready() -> tuple[bool, str]:
 
 
 def _run_flow(args: list[str], timeout: int = 600) -> subprocess.CompletedProcess:
-    cmd = ["python3", str(FLOW_SCRIPT), *args]
+    cmd = [_PYTHON_BIN, str(FLOW_SCRIPT), *args]
     print(f"[MultiClip] Ejecutando: {' '.join(cmd)}")
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=str(SKILL_DIR))
 
