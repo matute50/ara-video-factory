@@ -33,6 +33,32 @@ from agents.storage_agent import StorageAgent
 POLL_INTERVAL_MINUTES: int = int(os.environ.get("POLL_INTERVAL_MINUTES", "5"))
 DRY_RUN_MODE: bool = os.environ.get("FACTORIA_DRY_RUN", "true").lower() in ("true", "1", "yes")
 
+# Bucket de Storage para assets generados por la fábrica
+ASSET_BUCKET: str = os.environ.get("ASSET_BUCKET", "video-factory-assets")
+
+
+def public_bucket_url(storage: StorageAgent, bucket: str, path: str) -> str:
+    """URL pública de un objeto en Supabase Storage."""
+    return f"{storage.url}/storage/v1/object/public/{bucket}/{path}"
+
+
+def upload_to_bucket(
+    storage: StorageAgent,
+    bucket: str,
+    path: str,
+    file_bytes: bytes,
+    content_type: str = "image/png",
+) -> bool:
+    """Sube bytes a Supabase Storage. Devuelve True si ok."""
+    headers = storage.get_headers(False)
+    headers["Content-Type"] = content_type
+    url = f"{storage.url}/storage/v1/object/{bucket}/{path}"
+    resp = _req.post(url, headers=headers, data=file_bytes, timeout=60)
+    if resp.status_code not in (200, 201):
+        print(f"[Worker] Upload a Storage falló ({resp.status_code}): {resp.text[:200]}")
+        return False
+    return True
+
 
 def _fetch_article(storage: StorageAgent, article_id: int) -> Optional[dict]:
     """Trae un artículo completo desde Supabase."""
@@ -255,6 +281,7 @@ def _process_live(storage: StorageAgent, job_id: int, article_id: int,
 
     # Subir a Google Drive (no bloqueante — error se registra pero no falla el job)
     from src.google_drive_uploader import upload_video_to_drive
+    meta = parsed_ara.get('meta_ara', {})
     drive_result = upload_video_to_drive(output_path, article_id, tenor=meta.get('tenor', 'informativo'))
     drive_ok = drive_result.get("ok", False)
     drive_url = drive_result.get("remote_url") or ""
