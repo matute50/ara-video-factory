@@ -25,9 +25,30 @@ ACTUAL_SKILL_DIR = VENDOR_DIR if VENDOR_DIR.exists() else SKILL_DIR
 FLOW_SCRIPT = ACTUAL_SKILL_DIR / "flow.py"
 COOLDOWN_SECONDS: int = int(os.environ.get("FLOW_COOLDOWN_SECONDS", "90"))
 VIDEO_MODEL: str = os.environ.get("FLOW_VIDEO_MODEL", "Veo 3.1 - Lite")
+# Fase 2: la imagen maestra usa el tier básico (Nano Banana 2 Lite), NO Pro.
+IMAGE_MODEL: str = os.environ.get("FLOW_IMAGE_MODEL", "Nano Banana 2 Lite")
 PROJECT_NAME: str = os.environ.get("FLOW_PROJECT_NAME", "saladillo-vivo-ara")
 OUTPUT_BASE = FABRIC_DIR / "output"
 OUTPUT_BASE.mkdir(parents=True, exist_ok=True)
+
+# Encontrar el mejor python3 disponible (con playwright)
+def _find_python_with_playwright():
+    import glob
+    candidates = (
+        "/home/matias/.hermes/tools/python-*/bin/python3",
+        "/usr/bin/python3.14",
+        "/usr/bin/python3",
+    )
+    for pattern in candidates:
+        matches = glob.glob(pattern)
+        for p in matches:
+            if os.path.isfile(p):
+                r = subprocess.run([p, "-c", "import playwright"], capture_output=True, timeout=5)
+                if r.returncode == 0:
+                    return p
+    return "python3"
+
+_PYTHON_BIN = _find_python_with_playwright()
 
 
 @dataclass
@@ -54,7 +75,7 @@ def status_check() -> dict:
     """Ejecuta flow.py status para verificar login activo."""
     try:
         result = subprocess.run(
-            ["python3", str(FLOW_SCRIPT), "status"],
+            [_PYTHON_BIN, str(FLOW_SCRIPT), "status"],
             capture_output=True, text=True, timeout=30,
         )
         return {"ok": result.returncode == 0, "stdout": result.stdout, "stderr": result.stderr}
@@ -74,7 +95,7 @@ def generate_batch_json(job: FlowJob) -> dict:
         "project": PROJECT_NAME,
         "defaults": {
             "ratio": "9:16",
-            "image_model": "Nano Banana Pro",
+            "image_model": IMAGE_MODEL,
             "video_model": VIDEO_MODEL,
         },
         "jobs": [
@@ -134,7 +155,7 @@ def dry_run_batch(batch_payload: dict) -> dict:
 def run_live_batch(batch_file: str) -> dict:
     """Ejecuta flow.py batch real (consume créditos)."""
     try:
-        cmd = ["python3", str(FLOW_SCRIPT), "batch", batch_file]
+        cmd = [_PYTHON_BIN, str(FLOW_SCRIPT), "batch", batch_file]
         print(f"[FlowBridge] Ejecutando: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         return {
