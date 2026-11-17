@@ -216,11 +216,6 @@ def process_image_only_job(
     job = get_or_create_job(storage, article_id)
     job_id = job.get('id')
 
-    update_job_status(storage, job_id,
-                      tipo='imagen',
-                      estado='generando_imagen',
-                      prompt_imagen=prompts['prompt_imagen'])
-
     # QC sensible no aplica: la imagen maestra se genera igual; el QC va antes del video.
     if dry_run:
         return {
@@ -228,6 +223,12 @@ def process_image_only_job(
             "article_id": article_id,
             "prompt_imagen": prompts['prompt_imagen'],
         }
+
+    # LIVE
+    update_job_status(storage, job_id,
+                      tipo='imagen',
+                      estado='generando_imagen',
+                      prompt_imagen=prompts['prompt_imagen'])
 
     # LIVE: generar solo la imagen
     batch_file = str(OUTPUT_BASE / f"batch_img_{job_id}.json")

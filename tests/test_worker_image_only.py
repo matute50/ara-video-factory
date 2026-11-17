@@ -69,7 +69,9 @@ def test_process_image_only_live_uploads_and_marks_lista(tmp_path, monkeypatch):
 def test_process_image_only_dry_run_does_not_upload(tmp_path, monkeypatch):
     monkeypatch.setattr(worker, "_fetch_article", lambda s, aid: _fake_article())
     monkeypatch.setattr(worker, "get_or_create_job", lambda s, aid: {"id": 7, "article_id": aid})
-    monkeypatch.setattr(worker, "update_job_status", lambda s, jid, **f: None)
+    db_writes = []
+    monkeypatch.setattr(worker, "update_job_status",
+                        lambda s, jid, **f: db_writes.append((jid, f)))
     uploaded = []
     monkeypatch.setattr(worker, "upload_to_bucket",
                         lambda s, b, path, data, content_type="image/png": uploaded.append(path) or True)
@@ -79,3 +81,4 @@ def test_process_image_only_dry_run_does_not_upload(tmp_path, monkeypatch):
     assert result["ok"] is True
     assert result.get("dry_run") is True
     assert uploaded == []
+    assert db_writes == []  # el dry-run no debe tocar la DB
