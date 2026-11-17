@@ -31,6 +31,25 @@ PROJECT_NAME: str = os.environ.get("FLOW_PROJECT_NAME", "saladillo-vivo-ara")
 OUTPUT_BASE = FABRIC_DIR / "output"
 OUTPUT_BASE.mkdir(parents=True, exist_ok=True)
 
+
+def _get_master_image_ref() -> Optional[str]:
+    """
+    Retorna la ruta de la imagen maestra de Ara si está configurada en el entorno.
+    Devuelve None si no hay configuración disponible.
+    """
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if not env_path.exists():
+        return None
+    with open(env_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith("FLOW_BASE_IMAGE_REF") and "=" in line:
+                val = line.split("=", 1)[1].strip().strip("\"'")
+                if val and Path(val).exists():
+                    return val
+    return None
+
+
 # Encontrar el mejor python3 disponible (con playwright)
 def _find_python_with_playwright():
     import glob
@@ -91,6 +110,19 @@ def generate_batch_json(job: FlowJob) -> dict:
     Encadena imagen → video con start=<imagen_result>.
     Estructura compatible con examples/guion_ejemplo.json de google-flow-skill.
     """
+    # Obtener imagen maestra de referencia si está configurada
+    master_ref = _get_master_image_ref()
+    
+    image_job = {
+        "type": "image",
+        "name": f"img_{job.article_id}_frame",
+        "prompt": job.prompt_imagen,
+    }
+    
+    # Si hay imagen maestra, usarla como referencia para el job de imagen
+    if master_ref:
+        image_job["image"] = master_ref
+    
     return {
         "project": PROJECT_NAME,
         "defaults": {
@@ -99,11 +131,7 @@ def generate_batch_json(job: FlowJob) -> dict:
             "video_model": VIDEO_MODEL,
         },
         "jobs": [
-            {
-                "type": "image",
-                "name": f"img_{job.article_id}_frame",
-                "prompt": job.prompt_imagen,
-            },
+            image_job,
             {
                 "type": "video",
                 "name": f"vid_{job.article_id}_clip",
