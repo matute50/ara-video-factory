@@ -1,15 +1,18 @@
-"""
-Worker principal de la Fábrica de Videos Ara.
-Polling sobre Supabase, ensambla prompts, orquesta Flow (dry-run/literal) y QC por Telegram.
+"""Worker principal de la Fábrica de Videos Ara.
+
+Polling sobre Supabase, ensambla prompts, orquesta Flow (dry-run/live) y QC por Telegram.
 """
 from __future__ import annotations
+import argparse
 import json
 import os
 import sys
 import time
-import argparse
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Optional
+
 import requests as _req
 
 # Agregar ruta del proyecto parent para imports del pipeline
@@ -20,22 +23,49 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")  # .env del factory
 
 from src.prompt_assembler import assemble_prompts
 from src.flow_bridge import (
-    FlowJob, check_skill_ready, dry_run_batch, generate_batch_json,
-    generate_image_only_json, run_live_batch, wait_cooldown, OUTPUT_BASE,
-    SKILL_DIR, PROJECT_NAME,
+    FlowJob,
+    check_skill_ready,
+    dry_run_batch,
+    generate_batch_json,
+    generate_image_only_json,
+    run_live_batch,
+    wait_cooldown,
+    OUTPUT_BASE,
+    SKILL_DIR,
+    PROJECT_NAME,
 )
 from src.ffmpeg_composer import process_video as compose_video
 from src.telegram_notifier import QCPayload, send_qc_request, notify_batch_complete
+from src.google_drive_uploader import upload_video_to_drive
 from agents.storage_agent import StorageAgent
 
 # ---------------------------------------------------------------------------
-# Constantes
+# Constantes y tipos
 # ---------------------------------------------------------------------------
 POLL_INTERVAL_MINUTES: int = int(os.environ.get("POLL_INTERVAL_MINUTES", "5"))
 DRY_RUN_MODE: bool = os.environ.get("FACTORIA_DRY_RUN", "true").lower() in ("true", "1", "yes")
-
-# Bucket de Storage para assets generados por la fábrica
 ASSET_BUCKET: str = os.environ.get("ASSET_BUCKET", "video-factory-assets")
+BATCH_REPORT_PATH = Path(SKILL_DIR) / "outputs" / PROJECT_NAME / "batch_report.json"
+
+
+@dataclass(slots=True)
+class JobResult:
+    """Resultado estandarizado de procesamiento de job."""
+    ok: bool
+    job_id: Optional[int] = None
+    article_id: Optional[int] = None
+    error: Optional[str] = None
+    dry_run: bool = False
+    status: Optional[str] = None
+    output_path: Optional[str] = None
+    batch_report: Optional[Any] = None
+    prompt_imagen: Optional[str] = None
+    prompt_veo: Optional[str] = None
+    master_image_url: Optional[str] = None
+    image_path: Optional[str] = None
+    details: Optional[dict] = None
+    word_count_prompt_veo: int = 0
+    tenor: Optional[str] = None
 
 
 def public_bucket_url(storage: StorageAgent, bucket: str, path: str) -> str:
@@ -65,7 +95,7 @@ def _fetch_article(storage: StorageAgent, article_id: int) -> Optional[dict]:
     """Trae un artículo completo desde Supabase."""
     resp = _req.get(
         f"{storage.base_rest_url}",
-        params={'select': '*', 'id': f'eq.{article_id}'},
+        params={"select": "*", "id": f"eq.{article_id}"},
         headers=storage.get_headers(False),
         timeout=15,
     )
@@ -76,32 +106,37 @@ def _fetch_article(storage: StorageAgent, article_id: int) -> Optional[dict]:
 
 def fetch_pending_jobs(storage: StorageAgent, limit: int = 5) -> list[dict]:
     """Trae artículos con ara_json NO NULL que aún no tengan job en ara_video_jobs."""
-    # Buscar artículos con ara_json no nulo y enviado_a_ara=true
     resp = _req.get(
         f"{storage.base_rest_url}",
         params={
-            'select': '*',
-            'ara_json': 'neq.null',
-            'enviado_a_ara': 'eq.true',
-            'order': 'created_at.desc',
-            'limit': str(limit),
+            "select": "*",
+            "ara_json": "neq.null",
+            "enviado_a_ara": "eq.true",
+            "order": "created_at.desc",
+            "limit": str(limit),
         },
         headers=storage.get_headers(False),
         timeout=15,
     )
     if resp.status_code != 200 or not resp.json():
         return []
+
     # Filtrar los que ya tienen job en ara_video_jobs
-    known_job_ids = set()
+    article_ids = [a["id"] for a in resp.json()]
+    if not article_ids:
+        return []
+
     jobs_resp = _req.get(
-        f"{storage.url}/rest/v1/ara_video_jobs?id=in.({','.join(map(str, [a['id'] for a in resp.json()]))})",
-        params={'select': 'article_id'},
+        f"{storage.url}/rest/v1/ara_video_jobs",
+        params={"select": "article_id", "article_id": f"in.({','.join(map(str, article_ids))})"},
         headers=storage.get_headers(False),
         timeout=15,
     )
+    known_job_ids = set()
     if jobs_resp.status_code == 200 and jobs_resp.json():
-        known_job_ids = {j['article_id'] for j in jobs_resp.json()}
-    return [a for a in resp.json() if a['id'] not in known_job_ids]
+        known_job_ids = {j["article_id"] for j in jobs_resp.json()}
+
+    return [a for a in resp.json() if a["id"] not in known_job_ids]
 
 
 def fetch_pending_image_jobs(storage: StorageAgent, limit: int = 5) -> list[dict]:
@@ -109,11 +144,11 @@ def fetch_pending_image_jobs(storage: StorageAgent, limit: int = 5) -> list[dict
     resp = _req.get(
         f"{storage.url}/rest/v1/ara_video_jobs",
         params={
-            'select': 'id,article_id',
-            'tipo': 'eq.imagen',
-            'estado': 'eq.pendiente_imagen',
-            'order': 'created_at.desc',
-            'limit': str(limit),
+            "select": "id,article_id",
+            "tipo": "eq.imagen",
+            "estado": "eq.pendiente_imagen",
+            "order": "created_at.desc",
+            "limit": str(limit),
         },
         headers=storage.get_headers(False),
         timeout=15,
@@ -123,29 +158,12 @@ def fetch_pending_image_jobs(storage: StorageAgent, limit: int = 5) -> list[dict
     return resp.json()
 
 
-def process_pending_image_jobs(storage: StorageAgent, dry_run: bool = True, limit: int = 5) -> dict:
-    """Procesa todos los trabajos de imagen maestra pendientes."""
-    jobs = fetch_pending_image_jobs(storage, limit=limit)
-    success = 0
-    failures = []
-    for job in jobs:
-        try:
-            result = process_image_only_job(storage, job['article_id'], dry_run=dry_run)
-            if result.get('ok'):
-                success += 1
-            else:
-                failures.append({"article_id": job['article_id'], "error": result.get('error')})
-        except Exception as e:  # noqa: BLE001
-            failures.append({"article_id": job['article_id'], "error": str(e)})
-    return {"ok": len(failures) == 0, "total": len(jobs), "success": success, "failures": failures}
-
-
 def get_or_create_job(storage: StorageAgent, article_id: int) -> dict:
     """Crea o devuelve registro existente en ara_video_jobs."""
     try:
         resp = _req.get(
             f"{storage.url}/rest/v1/ara_video_jobs?article_id=eq.{article_id}",
-            params={'select': '*'},
+            params={"select": "*"},
             headers=storage.get_headers(False),
             timeout=15,
         )
@@ -153,26 +171,27 @@ def get_or_create_job(storage: StorageAgent, article_id: int) -> dict:
             return resp.json()[0]
     except Exception as e:
         print(f"[Worker] Warning consultando jobs: {e}")
+
     # Crear nuevo
     try:
         create_resp = _req.post(
             f"{storage.url}/rest/v1/ara_video_jobs",
-            json={'article_id': article_id, 'estado': 'pendiente_ensamblado'},
+            json={"article_id": article_id, "estado": "pendiente_ensamblado"},
             headers=storage.get_headers(True),
             timeout=15,
         )
         if create_resp.status_code in (200, 201):
             return create_resp.json()[0]
         if create_resp.status_code == 404:
-            print(f"[Worker] Tabla ara_video_jobs no existe aún — ejecuta la migración SQL primero.")
-            return {'id': None, 'article_id': article_id, 'estado': 'pendiente_ensamblado', '_mock': True}
+            print("[Worker] Tabla ara_video_jobs no existe aún — ejecuta la migración SQL primero.")
+            return {"id": None, "article_id": article_id, "estado": "pendiente_ensamblado", "_mock": True}
         raise RuntimeError(f"Error creando job: {create_resp.text[:200]}")
     except Exception as e:
         print(f"[Worker] Error creando job: {e}")
-        return {'id': None, 'article_id': article_id, 'estado': 'pendiente_ensamblado', '_mock': True}
+        return {"id": None, "article_id": article_id, "estado": "pendiente_ensamblado", "_mock": True}
 
 
-def update_job_status(storage: StorageAgent, job_id: int, **fields) -> None:
+def update_job_status(storage: StorageAgent, job_id: int, **fields: Any) -> None:
     """Actualiza campos de un job en ara_video_jobs."""
     resp = _req.patch(
         f"{storage.url}/rest/v1/ara_video_jobs?id=eq.{job_id}",
@@ -184,82 +203,99 @@ def update_job_status(storage: StorageAgent, job_id: int, **fields) -> None:
         print(f"[Worker] Warning updating job {job_id}: {resp.status_code} {resp.text[:100]}")
 
 
+def _read_batch_report() -> Optional[list[dict]]:
+    """Lee y parsea batch_report.json si existe."""
+    if not BATCH_REPORT_PATH.exists():
+        return None
+    try:
+        return json.loads(BATCH_REPORT_PATH.read_text())
+    except Exception as e:
+        print(f"[Worker] Error leyendo batch_report: {e}")
+        return None
+
+
+def _find_generated_file(batch_report: Optional[list[dict]], file_type: str) -> Optional[str]:
+    """Busca en batch_report un archivo generado del tipo indicado."""
+    if not batch_report:
+        return None
+    for entry in batch_report:
+        if entry.get("type") == file_type and entry.get("file") and entry.get("ok"):
+            return entry["file"]
+    return None
+
+
+def _ensure_test_video(article_id: int) -> str:
+    """Genera un video testsrc si no existe (fallback para dry-run/live sin Flow)."""
+    import subprocess
+    test_path = str(OUTPUT_BASE / f"testsrc_{article_id}.mp4")
+    if Path(test_path).exists():
+        return test_path
+    subprocess.run([
+        "ffmpeg", "-y", "-f", "lavfi", "-i",
+        f"testsrc2=size=1920x1080:duration=8:rate=30",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", test_path
+    ], capture_output=True)
+    return test_path
+
+
 def process_image_only_job(
     storage: StorageAgent,
     article_id: int,
     dry_run: bool = True,
-) -> dict:
-    """Genera SOLO la imagen maestra (tipo='imagen'), la sube a Storage y
-    actualiza el job. No genera video."""
+) -> JobResult:
+    """Genera SOLO la imagen maestra (tipo='imagen'), la sube a Storage y actualiza el job."""
     article = _fetch_article(storage, article_id)
     if not article:
-        return {"ok": False, "error": f"Artículo {article_id} no encontrado"}
+        return JobResult(ok=False, article_id=article_id, error=f"Artículo {article_id} no encontrado")
 
-    ara_json = article.get('ara_json')
+    ara_json = article.get("ara_json")
     if not ara_json:
-        return {"ok": False, "error": "Sin ara_json"}
+        return JobResult(ok=False, article_id=article_id, error="Sin ara_json")
 
     parsed_ara = json.loads(ara_json) if isinstance(ara_json, str) else ara_json
-    contenido = parsed_ara.get('contenido', {})
-    meta = parsed_ara.get('meta_ara', {})
-    requires_approval = meta.get('requiere_aprobacion_sensible', False)
+    contenido = parsed_ara.get("contenido", {})
+    meta = parsed_ara.get("meta_ara", {})
+    requires_approval = meta.get("requiere_aprobacion_sensible", False)
 
     prompts = assemble_prompts(
         ara_json_input=parsed_ara,
-        volanta_zocalo=contenido.get('volanta_zocalo', 'Ara · Saladillo Vivo'),
-        titulo_zocalo=contenido.get('titulo_zocalo', ''),
+        volanta_zocalo=contenido.get("volanta_zocalo", "Ara · Saladillo Vivo"),
+        titulo_zocalo=contenido.get("titulo_zocalo", ""),
         allow_smile=not requires_approval,
     )
-    if not prompts['valid']:
-        return {"ok": False, "error": f"Prompt assembly failed: {prompts['errors']}"}
+    if not prompts["valid"]:
+        return JobResult(ok=False, article_id=article_id, error=f"Prompt assembly failed: {prompts['errors']}")
 
     job = get_or_create_job(storage, article_id)
-    job_id = job.get('id')
+    job_id = job.get("id")
+    if job_id is None:
+        return JobResult(ok=False, article_id=article_id, error="No se pudo crear/obtener job_id")
 
-    # QC sensible no aplica: la imagen maestra se genera igual; el QC va antes del video.
     if dry_run:
-        return {
-            "ok": True, "dry_run": True, "job_id": job_id,
-            "article_id": article_id,
-            "prompt_imagen": prompts['prompt_imagen'],
-        }
+        return JobResult(
+            ok=True, dry_run=True, job_id=job_id, article_id=article_id,
+            prompt_imagen=prompts["prompt_imagen"],
+        )
 
-    # LIVE
-    update_job_status(storage, job_id,
-                      tipo='imagen',
-                      estado='generando_imagen',
-                      prompt_imagen=prompts['prompt_imagen'])
+    # LIVE: generar imagen maestra
+    update_job_status(storage, job_id, tipo="imagen", estado="generando_imagen", prompt_imagen=prompts["prompt_imagen"])
 
-    # LIVE: generar solo la imagen
     batch_file = str(OUTPUT_BASE / f"batch_img_{job_id}.json")
-    payload = generate_image_only_json(article_id, prompts['prompt_imagen'])
+    payload = generate_image_only_json(article_id, prompts["prompt_imagen"])
     with open(batch_file, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
 
     result = run_live_batch(batch_file)
-    if not result['ok']:
-        update_job_status(storage, job_id,
-                          estado="error_reintentable", ultimo_error=str(result))
-        return {"ok": False, "error": "Flow image generation failed", "details": result}
+    if not result["ok"]:
+        update_job_status(storage, job_id, estado="error_reintentable", ultimo_error=str(result))
+        return JobResult(ok=False, article_id=article_id, error="Flow image generation failed", details=result)
 
-    # Leer batch_report.json y ubicar la imagen generada
-    report_path = Path(SKILL_DIR) / "outputs" / PROJECT_NAME / "batch_report.json"
-    batch_report = None
-    image_path = None
-    if report_path.exists():
-        try:
-            batch_report = json.loads(report_path.read_text())
-        except Exception as e:
-            print(f"[Worker] Error leyendo batch_report: {e}")
-    for entry in (batch_report or []):
-        if entry.get("type") == "image" and entry.get("file") and entry.get("ok"):
-            image_path = entry["file"]
-            break
+    batch_report = _read_batch_report()
+    image_path = _find_generated_file(batch_report, "image")
 
     if not image_path or not Path(image_path).exists():
-        update_job_status(storage, job_id,
-                          estado="error_reintentable", ultimo_error="Imagen no encontrada en batch_report")
-        return {"ok": False, "error": "Imagen maestra no generada por Flow"}
+        update_job_status(storage, job_id, estado="error_reintentable", ultimo_error="Imagen no encontrada en batch_report")
+        return JobResult(ok=False, article_id=article_id, error="Imagen maestra no generada por Flow")
 
     # Subir a Storage y registrar URL pública
     dest_path = f"master-images/{job_id}.png"
@@ -275,33 +311,39 @@ def process_image_only_job(
         batch_report_json=batch_report,
     )
 
-    return {
-        "ok": upload_ok, "job_id": job_id, "article_id": article_id,
-        "master_image_url": master_url, "image_path": image_path,
-        "batch_report": batch_report,
-    }
+    return JobResult(
+        ok=upload_ok, job_id=job_id, article_id=article_id,
+        master_image_url=master_url, image_path=image_path,
+        batch_report=batch_report,
+    )
 
 
-def process_single_article(
-    storage: StorageAgent,
-    article_data: dict,
-    dry_run: bool = True,
-) -> dict:
-    """Procesa un artículo completo: ensamble → Flow → FFmpeg → entrega."""
-    article_id = article_data['id']
-    ara_json = article_data.get('ara_json')
+def process_pending_image_jobs(storage: StorageAgent, dry_run: bool = True, limit: int = 5) -> dict:
+    """Procesa todos los trabajos de imagen maestra pendientes."""
+    jobs = fetch_pending_image_jobs(storage, limit=limit)
+    success = 0
+    failures = []
+    for job in jobs:
+        try:
+            result = process_image_only_job(storage, job["article_id"], dry_run=dry_run)
+            if result.ok:
+                success += 1
+            else:
+                failures.append({"article_id": job["article_id"], "error": result.error})
+        except Exception as e:  # noqa: BLE001
+            failures.append({"article_id": job["article_id"], "error": str(e)})
+    return {"ok": len(failures) == 0, "total": len(jobs), "success": success, "failures": failures}
 
-    if not ara_json:
-        return {"ok": False, "error": "Sin ara_json"}
 
-    # Assemblar prompts
-    parsed_ara = json.loads(ara_json) if isinstance(ara_json, str) else ara_json
-    meta = parsed_ara.get('meta_ara', {})
-    tenor = meta.get('tenor', 'informativo_servicio')
-    requires_approval = meta.get('requiere_aprobacion_sensible', False)
+def _assemble_prompts_for_article(parsed_ara: dict) -> tuple[dict, str, str, str, bool]:
+    """Extrae datos del ara_json y ensambla prompts. Retorna (prompts, tenor, volanta, titulo, requires_approval)."""
+    meta = parsed_ara.get("meta_ara", {})
+    tenor = meta.get("tenor", "informativo_servicio")
+    requires_approval = meta.get("requiere_aprobacion_sensible", False)
 
-    volanta = parsed_ara.get('contenido', {}).get('volanta_zocalo', 'Ara · Saladillo Vivo')
-    titulo = parsed_ara.get('contenido', {}).get('titulo_zocalo', '')
+    contenido = parsed_ara.get("contenido", {})
+    volanta = contenido.get("volanta_zocalo", "Ara · Saladillo Vivo")
+    titulo = contenido.get("titulo_zocalo", "")
 
     prompts = assemble_prompts(
         ara_json_input=parsed_ara,
@@ -309,21 +351,37 @@ def process_single_article(
         titulo_zocalo=titulo,
         allow_smile=not requires_approval,
     )
+    return prompts, tenor, volanta, titulo, requires_approval
 
-    if not prompts['valid']:
-        return {
-            "ok": False,
-            "error": f"Prompt assembly failed: {prompts['errors']}",
-            "prompt_debug": prompts.get('_debug', {}),
-        }
+
+def process_single_article(
+    storage: StorageAgent,
+    article_data: dict,
+    dry_run: bool = True,
+) -> JobResult:
+    """Procesa un artículo completo: ensamble → Flow → FFmpeg → entrega."""
+    article_id = article_data["id"]
+    ara_json = article_data.get("ara_json")
+
+    if not ara_json:
+        return JobResult(ok=False, article_id=article_id, error="Sin ara_json")
+
+    parsed_ara = json.loads(ara_json) if isinstance(ara_json, str) else ara_json
+    prompts, tenor, volanta, titulo, requires_approval = _assemble_prompts_for_article(parsed_ara)
+
+    if not prompts["valid"]:
+        return JobResult(
+            ok=False, article_id=article_id,
+            error=f"Prompt assembly failed: {prompts['errors']}",
+            prompt_imagen=prompts.get("prompt_imagen"),
+            prompt_veo=prompts.get("prompt_veo"),
+        )
 
     job = get_or_create_job(storage, article_id)
-    job_id = job['id']
+    job_id = job["id"]
 
     # Actualizar prompts en el job
-    update_job_status(storage, job_id,
-                      prompt_imagen=prompts['prompt_imagen'],
-                      prompt_veo=prompts['prompt_veo'])
+    update_job_status(storage, job_id, prompt_imagen=prompts["prompt_imagen"], prompt_veo=prompts["prompt_veo"])
 
     # QC sensible
     if requires_approval:
@@ -331,97 +389,83 @@ def process_single_article(
         qc_payload = QCPayload(
             article_id=article_id,
             tenor=tenor,
-            guion_ara=parsed_ara['contenido']['guion_ara'],
+            guion_ara=parsed_ara["contenido"]["guion_ara"],
             volanta_zocalo=volanta,
             titulo_zocalo=titulo,
-            prompt_veo=prompts['prompt_veo'],
+            prompt_veo=prompts["prompt_veo"],
             requires_approval=True,
         )
         send_qc_request(qc_payload)
-        return {"ok": True, "status": "waiting_for_qc", "job_id": job_id}
+        return JobResult(ok=True, status="waiting_for_qc", job_id=job_id, article_id=article_id)
 
     if dry_run:
         job_flow = FlowJob(
             job_id=job_id,
             article_id=article_id,
-            prompt_imagen=prompts['prompt_imagen'],
-            prompt_veo=prompts['prompt_veo'],
+            prompt_imagen=prompts["prompt_imagen"],
+            prompt_veo=prompts["prompt_veo"],
             estado_actual="generando_imagen",
         )
         batch_payload = generate_batch_json(job_flow)
         result = dry_run_batch(batch_payload)
         update_job_status(storage, job_id, estado="aprobado", batch_report_json=result)
-        return {
-            **result,
-            "job_id": job_id,
-            "article_id": article_id,
-            "prompt_imagen": prompts['prompt_imagen'],
-            "prompt_veo": prompts['prompt_veo'],
-            "word_count_prompt_veo": len(prompts['prompt_veo'].split()),
-            "tenor": tenor,
-        }
+        return JobResult(
+            ok=True,  # dry-run siempre es exitoso (no falla)
+            job_id=job_id,
+            article_id=article_id,
+            prompt_imagen=prompts["prompt_imagen"],
+            prompt_veo=prompts["prompt_veo"],
+            word_count_prompt_veo=len(prompts["prompt_veo"].split()) if prompts.get("prompt_veo") else 0,
+            tenor=tenor,
+            dry_run=True,
+            batch_report=result,
+        )
 
-    # LIVE MODE (no usado en desarrollo/testing)
-    return _process_live(storage, job_id, article_id, prompts, parsed_ara)
+    # LIVE MODE
+    return _process_live(storage, job_id, article_id, prompts, parsed_ara, volanta, titulo, tenor)
 
 
-def _process_live(storage: StorageAgent, job_id: int, article_id: int,
-                  prompts: dict, parsed_ara: dict) -> dict:
+def _process_live(
+    storage: StorageAgent,
+    job_id: int,
+    article_id: int,
+    prompts: dict,
+    parsed_ara: dict,
+    volanta: str,
+    titulo: str,
+    tenor: str,
+) -> JobResult:
     """Flujo completo live: imagen → video → FFmpeg → Telegram delivery."""
-    job = FlowJob(job_id, article_id, prompts['prompt_imagen'], prompts['prompt_veo'], "generando_imagen")
+    job = FlowJob(job_id, article_id, prompts["prompt_imagen"], prompts["prompt_veo"], "generando_imagen")
     batch_file_path = str(OUTPUT_BASE / f"batch_job_{job_id}.json")
     batch_payload = generate_batch_json(job)
     with open(batch_file_path, "w", encoding="utf-8") as f:
         json.dump(batch_payload, f, indent=2, ensure_ascii=False)
 
     result = run_live_batch(batch_file_path)
-    if not result['ok']:
+    if not result["ok"]:
         update_job_status(storage, job_id, estado="error_reintentable", ultimo_error=str(result))
-        return {"ok": False, "error": "Flow generation failed", "details": result}
+        return JobResult(ok=False, article_id=article_id, error="Flow generation failed", details=result)
 
     wait_cooldown()
 
-    # Leer batch_report.json generado por flow.py
-    project_dir = SKILL_DIR / "outputs" / PROJECT_NAME
-    report_path = project_dir / "batch_report.json"
-    batch_report = None
-    raw_video_path = None
-    if report_path.exists():
-        try:
-            batch_report = json.loads(report_path.read_text())
-        except Exception as e:
-            print(f"[Worker] Error leyendo batch_report: {e}")
-
-    # Determinar video crudo: usar el generado por Flow si existe, sino mock
-    for entry in (batch_report or []):
-        if entry.get("type") == "video" and entry.get("file"):
-            raw_video_path = entry["file"]
-            break
+    batch_report = _read_batch_report()
+    raw_video_path = _find_generated_file(batch_report, "video")
 
     if not raw_video_path or not Path(raw_video_path).exists():
         print("[Worker] Video crudo de Flow no encontrado, usando testsrc como fallback.")
-        raw_video_path = str(OUTPUT_BASE / f"testsrc_{article_id}.mp4")
-        if not Path(raw_video_path).exists():
-            import subprocess
-            subprocess.run([
-                "ffmpeg", "-y", "-f", "lavfi", "-i",
-                f"testsrc2=size=1920x1080:duration=8:rate=30",
-                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", raw_video_path
-            ], capture_output=True)
+        raw_video_path = _ensure_test_video(article_id)
 
     output_path = str(OUTPUT_BASE / f"output_{article_id}_final.mp4")
-    compose_video(raw_video_path, output_path,
-                  volanta_text=parsed_ara['contenido']['volanta_zocalo'],
-                  titulo_text=parsed_ara['contenido']['titulo_zocalo'])
+    compose_video(raw_video_path, output_path, volanta_text=volanta, titulo_text=titulo)
 
     # Subir a Google Drive (no bloqueante — error se registra pero no falla el job)
-    from src.google_drive_uploader import upload_video_to_drive
-    meta = parsed_ara.get('meta_ara', {})
-    drive_result = upload_video_to_drive(output_path, article_id, tenor=meta.get('tenor', 'informativo'))
+    meta = parsed_ara.get("meta_ara", {})
+    drive_result = upload_video_to_drive(output_path, article_id, tenor=meta.get("tenor", "informativo"))
     drive_ok = drive_result.get("ok", False)
     drive_url = drive_result.get("remote_url") or ""
     if not drive_ok:
-        print(f"[Worker] ⚠️ Upload a Drive falló: {drive_result.get('error','')}")
+        print(f"[Worker] ⚠️ Upload a Drive falló: {drive_result.get('error', '')}")
 
     # Actualizar estado y guardar reporte
     update_job_status(
@@ -436,13 +480,12 @@ def _process_live(storage: StorageAgent, job_id: int, article_id: int,
     # Notificar entrega por Telegram
     notify_batch_complete(1, 1, 0)
 
-    return {"ok": True, "job_id": job_id, "output_path": output_path, "batch_report": batch_report}
+    return JobResult(ok=True, job_id=job_id, article_id=article_id, output_path=output_path, batch_report=batch_report)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Ara Video Factory Worker")
-    parser.add_argument("--dry-run", action="store_true", default=True,
-                        help="Modo prueba sin créditos (default)")
+    parser.add_argument("--dry-run", action="store_true", default=True, help="Modo prueba sin créditos (default)")
     parser.add_argument("--live", action="store_true", help="Ejecutar generación real")
     parser.add_argument("--article-id", type=int, help="Procesar solo este artículo")
     parser.add_argument("--image", action="store_true", help="Generar SOLO la imagen maestra (tipo=imagen)")
@@ -452,7 +495,7 @@ def main():
     dry_run = not args.live
 
     print("=" * 60)
-    print("ARA VIDEO FACTORY — Worker v1.0")
+    print("ARA VIDEO FACTORY — Worker v1.1")
     print(f"Dry-run mode: {'ON' if dry_run else 'OFF'}")
     print("=" * 60)
 
@@ -463,7 +506,7 @@ def main():
             print("       Continuando en modo dry-run (sin ejecutar Chrome ni Flow).")
         else:
             print(f"[ERROR] Skill no lista — se requiere 'flow.py login' manual antes de correr en vivo.")
-            exit(1)
+            sys.exit(1)
     else:
         print(f"Skill ready: OK | {skill_msg}")
 
@@ -480,11 +523,28 @@ def main():
             print(f"Artículo {args.article_id} no encontrado en Supabase")
             return
         result = process_single_article(storage, article, dry_run=dry_run)
-        print(json.dumps(result, indent=2, default=str, ensure_ascii=False))
+        # JobResult con slots=True no tiene __dict__, usar vars() o convertir manualmente
+        result_dict = {
+            "ok": result.ok,
+            "job_id": result.job_id,
+            "article_id": result.article_id,
+            "error": result.error,
+            "dry_run": result.dry_run,
+            "status": result.status,
+            "output_path": result.output_path,
+            "batch_report": result.batch_report,
+            "prompt_imagen": result.prompt_imagen,
+            "prompt_veo": result.prompt_veo,
+            "master_image_url": result.master_image_url,
+            "image_path": result.image_path,
+            "details": result.details,
+            "word_count_prompt_veo": result.word_count_prompt_veo,
+            "tenor": result.tenor,
+        }
+        print(json.dumps(result_dict, indent=2, default=str, ensure_ascii=False))
         return
 
     if args.poll:
-        from datetime import datetime
         print(f"Polling cada {POLL_INTERVAL_MINUTES} minutos...")
         while True:
             try:
@@ -515,12 +575,12 @@ def main():
     for art in jobs:
         try:
             result = process_single_article(storage, art, dry_run=dry_run)
-            if result.get('ok'):
+            if result.ok:
                 success += 1
             else:
-                failures.append({"id": art['id'], "error": result.get('error')})
+                failures.append({"id": art["id"], "error": result.error})
         except Exception as e:
-            failures.append({"id": art['id'], "error": str(e)})
+            failures.append({"id": art["id"], "error": str(e)})
 
     print(f"\nBatch complete: {success} OK, {len(failures)} errors")
     if failures:
