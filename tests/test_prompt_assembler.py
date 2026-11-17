@@ -157,7 +157,7 @@ class TestMultiClipV11(unittest.TestCase):
                 "permitir_sonrisa": True,
                 "tono_vocal": "Voz femenina joven y clara",
                 "ambiente_sonoro": "Sonido de calle céntrica de Saladillo, volumen bajo",
-                "continuidad_visual": "Periodista mujer, pelo negro largo recogido en cola baja, blazer azul marino sobrio, calle céntrica de Saladillo con iluminación diurna",
+                "continuidad_visual": "Mujer joven con cabello rizado natural negro, suelto o con accesorios (diadema/clip), vestimenta casual (jeans y campera liviana), maquillaje natural, mirada serena, iluminación diurna, calle céntrica de Saladillo",
             },
         }
 
@@ -187,7 +187,7 @@ class TestMultiClipV11(unittest.TestCase):
         """Debe extraer continuidad_visual de meta_ara."""
         ara = self._make_v11()
         cv = _extract_continuidad_visual(ara)
-        self.assertIn("blazer azul marino", cv)
+        self.assertIn("rizado natural", cv)
         # Sin campo, devuelve vacío
         ara2 = {"meta_ara": {}, "contenido": {}}
         self.assertEqual(_extract_continuidad_visual(ara2), "")
@@ -208,7 +208,7 @@ class TestMultiClipV11(unittest.TestCase):
         prompts = assemble_prompts_multi_clip(ara, n_clips=2)
         clip2 = prompts[1]['prompt_veo']
         self.assertIn("continuity:", clip2)
-        self.assertIn("blazer azul marino", clip2)
+        self.assertIn("rizado natural", clip2)
 
     def test_batch_json_v11(self):
         """El batch JSON debe encadenar clip2 a clip1."""

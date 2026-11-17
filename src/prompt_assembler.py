@@ -163,7 +163,7 @@ def assemble_prompts(
         pass
     # Si no hay descripción fija (v1.0 o agente antiguo), agregar nota genérica
     if not raw_cv:
-        raw_cv = "Periodista mujer con blazer azul marino sobre blusa blanca, pelo negro recogido, maquillaje natural, iluminacion natural frontal"
+        raw_cv = "Mujer joven con cabello rizado natural negro, suelto o con accesorios (diadema o clip), pelo afro con volumen definido, vestimenta casual (jeans, campera liviana o remera), maquillaje natural, mirada cercana y serena, iluminación natural diurna frontal"
     imagen_refs = (
         f"Referencia visual: foto de {persona_marker} combinada con fotos reales del centro de Saladillo ({SALADILLO_PHOTO_DIR}). "
         if FLOW_USE_CHARACTER and FLOW_BASE_IMAGE_REF
@@ -361,7 +361,7 @@ def assemble_prompts_multi_clip(
 
     # Inyectar look completo en el prompt de imagen para CLIP 1 también
     if not continuidad:
-        default_cv = "Periodista mujer con blazer azul marino sobre blusa blanca, pelo negro recogido, maquillaje natural, iluminacion natural frontal"
+        default_cv = "Mujer joven con cabello rizado natural negro, suelto o con accesorios (diadema o clip), pelo afro con volumen definido, vestimenta casual (jeans, campera liviana o remera), maquillaje natural, mirada cercana y serena, iluminación natural diurna frontal"
     else:
         default_cv = continuidad
     base_imagen_prompt = (
