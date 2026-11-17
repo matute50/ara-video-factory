@@ -115,7 +115,7 @@ def _get_master_image_ref() -> Optional[str]:
     Retorna la ruta de la imagen maestra de Ara si está configurada en el entorno.
     Devuelve None si no hay configuración disponible.
     """
-    env_path = Path(__file__).resolve().parent / ".env"
+    env_path = Path(__file__).resolve().parent.parent / ".env"
     if not env_path.exists():
         return None
     with open(env_path, encoding="utf-8") as f:

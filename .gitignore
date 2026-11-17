@@ -4,6 +4,7 @@ __pycache__/
 *.pyo
 .env
 .output/**/*.mp4
+reference_videos/**/*.mp4
 output/batch_*.json
 vendor/
 .git/
