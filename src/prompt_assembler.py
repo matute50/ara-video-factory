@@ -11,7 +11,8 @@ from typing import Dict, Optional
 # ---------------------------------------------------------------------------
 # Configuración
 # ---------------------------------------------------------------------------
-ENV_PATH = Path(__file__).resolve().parent / ".env"
+# El .env vive en la raíz del reposorio, no en src/
+ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 
 def _read_env(path: Path = ENV_PATH) -> dict:
     env: Dict[str, str] = {}
@@ -163,7 +164,7 @@ def assemble_prompts(
         pass
     # Si no hay descripción fija (v1.0 o agente antiguo), agregar nota genérica
     if not raw_cv:
-        raw_cv = "Mujer joven con cabello rizado natural negro (rizos sueltos, definidos pero no afro), suelto o con accesorios discretos (diadema fina o clip), vestimenta casual urbana (jeans, campera liviana o remera lisa), maquillaje natural sutil, mirada cercana y serena, piel clara, iluminación natural diurna frontal suave"
+        raw_cv = "Mujer joven con pelo marrón oscuro, largo, con ondas naturales, suelto o con accesorios discretos (diadema fina o clip), vestimenta casual urbana (jeans, campera liviana o remera lisa), maquillaje natural sutil, mirada cercana y serena, piel clara, iluminación natural diurna frontal suave"
     imagen_refs = (
         f"Referencia visual: foto de {persona_marker} combinada con fotos reales del centro de Saladillo ({SALADILLO_PHOTO_DIR}). "
         if FLOW_USE_CHARACTER and FLOW_BASE_IMAGE_REF
@@ -361,7 +362,7 @@ def assemble_prompts_multi_clip(
 
     # Inyectar look completo en el prompt de imagen para CLIP 1 también
     if not continuidad:
-        default_cv = "Mujer joven con cabello rizado natural negro (rizos sueltos, definidos pero no afro), suelto o con accesorios discretos (diadema fina o clip), vestimenta casual urbana (jeans, campera liviana o remera lisa), maquillaje natural sutil, mirada cercana y serena, piel clara, iluminación natural diurna frontal suave"
+        default_cv = "Mujer joven con pelo marrón oscuro, largo, con ondas naturales, suelto o con accesorios discretos (diadema fina o clip), vestimenta casual urbana (jeans, campera liviana o remera lisa), maquillaje natural sutil, mirada cercana y serena, piel clara, iluminación natural diurna frontal suave"
     else:
         default_cv = continuidad
     base_imagen_prompt = (
