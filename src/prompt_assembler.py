@@ -31,6 +31,20 @@ FLOW_BASE_IMAGE_REF: str = _CFG.get("FLOW_BASE_IMAGE_REF", "")
 # Ruta relativa desde repo al folder de fotos reales de Saladillo centro
 SALADILLO_PHOTO_DIR: str = _CFG.get("SALADILLO_PHOTO_DIR", "./reference_photos/center_saladillo/")
 
+# Descripción canónica definitiva de @Ara (fuente de verdad para el personaje).
+# Se usa cuando no hay 'continuidad_visual' explícita en meta_ara (v1.0 / agente antiguo).
+# Mantener exactitud: pelo marrón oscuro + ondas naturales + sin afro.
+ARA_CANONICAL_LOOK = (
+    "Mujer joven rioplatense, pelo marrón oscuro, largo, con ondas naturales sueltas "
+    "(NUNCA afro, NUNCA rizos cerrados tipo melena), recogido ocasionalmente con accesorios discretos "
+    "(diadema fina negra o clip metálico pequeño). Rostro ovalado, pómulos sutiles, "
+    "ojos castaños claros, cejas definidas naturales, nariz recta, labios finos. "
+    "Piel clara con leve tono cálido porteño. Vestimenta urbana casual fija: "
+    "jeans azul oscuro ajustados, campera liviana color beige claro abierta sobre remera blanca lisa "
+    "(sin logos ni estampas), zapatillas blancas deportivas. Maquillaje natural sutil: "
+    "delineador apenas perceptible, rubor ligero, brillo labial transparente. Mirada cercana y serena."
+)
+
 
 def _has_smile_word(text: str) -> bool:
     """Detecta palabras de sonrisa/entusiasmo prohibidas en tenores graves."""
@@ -158,23 +172,22 @@ def assemble_prompts(
     # Extraer descripción fija de continuidad visual (look completo del personaje)
     raw_cv = ""
     try:
-        parsed_ara = ara_json_input if isinstance(ara_json_input, dict) else json.loads(ara_json_input)
-        raw_cv = (parsed_ara.get("meta_ara") or {}).get("continuidad_visual", "") or ""
+        parsed_ara_local = ara_json_input if isinstance(ara_json_input, dict) else json.loads(ara_json_input)
+        raw_cv = (parsed_ara_local.get("meta_ara") or {}).get("continuidad_visual", "") or ""
     except Exception:
         pass
-    # Si no hay descripción fija (v1.0 o agente antiguo), agregar nota genérica
-    if not raw_cv:
-        raw_cv = "Mujer joven con pelo marrón oscuro, largo, con ondas naturales, suelto o con accesorios discretos (diadema fina o clip), vestimenta casual urbana (jeans, campera liviana o remera lisa), maquillaje natural sutil, mirada cercana y serena, piel clara, iluminación natural diurna frontal suave"
     imagen_refs = (
         f"Referencia visual: foto de {persona_marker} combinada con fotos reales del centro de Saladillo ({SALADILLO_PHOTO_DIR}). "
         if FLOW_USE_CHARACTER and FLOW_BASE_IMAGE_REF
         else ""
     )
+    # Usar descripción fija del personaje cuando no hay 'continuidad_visual' explícita
+    cv_text = raw_cv or ARA_CANONICAL_LOOK
     prompt_imagen = (
         f"Vertical 9:16. Close-up medio de {persona_marker}, tercio superior-medio, mirando directamente a cámara. "
         f"{lighting}. {vestimenta_note}. "
         f"{imagen_refs}"
-        f"Look exacto: {raw_cv}. "
+        f"Look exacto: {cv_text}. "
         f"Ambiente urbano exterior, escena real callejera de ciudad argentina mediana, "
         f"luz natural, fotografía periodística. NO estudio, NO fondo neutro, "
         f"sin carteles ni letreros con texto visible en la escena."
@@ -362,7 +375,7 @@ def assemble_prompts_multi_clip(
 
     # Inyectar look completo en el prompt de imagen para CLIP 1 también
     if not continuidad:
-        default_cv = "Mujer joven con pelo marrón oscuro, largo, con ondas naturales, suelto o con accesorios discretos (diadema fina o clip), vestimenta casual urbana (jeans, campera liviana o remera lisa), maquillaje natural sutil, mirada cercana y serena, piel clara, iluminación natural diurna frontal suave"
+        default_cv = ARA_CANONICAL_LOOK
     else:
         default_cv = continuidad
     base_imagen_prompt = (
