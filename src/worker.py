@@ -228,6 +228,24 @@ def fetch_pending_image_jobs(storage: StorageAgent, limit: int = 5) -> list[dict
     return resp.json()
 
 
+def fetch_pending_assembly_jobs(storage: StorageAgent, limit: int = 5) -> list[dict]:
+    """Trae trabajos pendientes de ensamblaje (estado='pendiente_ensamblado')."""
+    resp = _req.get(
+        f"{storage.url}/rest/v1/ara_video_jobs",
+        params={
+            "select": "id,article_id",
+            "estado": "eq.pendiente_ensamblado",
+            "order": "created_at.asc",
+            "limit": str(limit),
+        },
+        headers=storage.get_headers(False),
+        timeout=15,
+    )
+    if resp.status_code != 200 or not resp.json():
+        return []
+    return resp.json()
+
+
 def get_or_create_job(storage: StorageAgent, article_id: int) -> dict:
     """Crea o devuelve registro existente en ara_video_jobs."""
     try:
@@ -672,9 +690,17 @@ def main() -> None:
                 img = process_pending_image_jobs(storage, dry_run=dry_run)
                 # Trabajos que ya tienen imagen y necesitan video
                 vid = process_video_for_ready_image_jobs(storage, dry_run=dry_run)
+                # Trabajos pendientes de ensamble (creados externamente o recuperados)
+                asm = fetch_pending_assembly_jobs(storage)
+                for job in asm:
+                    article = _fetch_article(storage, job["article_id"])
+                    if article:
+                        process_single_article(storage, article, dry_run=dry_run)
+                        if not dry_run:
+                            wait_cooldown()
                 # Trabajos de video nuevos
                 jobs = fetch_pending_jobs(storage)
-                print(f"[{datetime.now().isoformat()}] Pending video jobs: {len(jobs)} | image jobs: {img.get('success', 0)} ok | await-video: {vid.get('success', 0)} ok | recovered: {total_recovered}")
+                print(f"[{datetime.now().isoformat()}] Pending video jobs: {len(jobs)} | assembly: {len(asm)} | image jobs: {img.get('success', 0)} ok | await-video: {vid.get('success', 0)} ok | recovered: {total_recovered}")
                 for job_art in jobs:
                     process_single_article(storage, job_art, dry_run=dry_run)
                     if not dry_run:
