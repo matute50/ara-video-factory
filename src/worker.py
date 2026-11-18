@@ -405,6 +405,46 @@ def process_pending_image_jobs(storage: StorageAgent, dry_run: bool = True, limi
     return {"ok": len(failures) == 0, "total": len(jobs), "success": success, "failures": failures}
 
 
+def fetch_pending_awaiting_video_jobs(storage: StorageAgent, limit: int = 5) -> list[dict]:
+    """Trae trabajos con imagen lista que aún no tienen video (estado='imagen_lista')."""
+    resp = _req.get(
+        f"{storage.url}/rest/v1/ara_video_jobs",
+        params={
+            "select": "id,article_id",
+            "estado": "eq.imagen_lista",
+            "master_image_url": "neq.null",
+            "order": "created_at.asc",
+            "limit": str(limit),
+        },
+        headers=storage.get_headers(False),
+        timeout=15,
+    )
+    if resp.status_code != 200 or not resp.json():
+        return []
+    return resp.json()
+
+
+def process_video_for_ready_image_jobs(storage: StorageAgent, dry_run: bool = True, limit: int = 5) -> dict:
+    """Procesa video para trabajos que ya tienen imagen generada (estado=imagen_lista)."""
+    jobs = fetch_pending_awaiting_video_jobs(storage, limit=limit)
+    success = 0
+    failures = []
+    for job in jobs:
+        try:
+            article = _fetch_article(storage, job["article_id"])
+            if not article:
+                failures.append({"article_id": job["article_id"], "error": f"Artículo {job['article_id']} no encontrado"})
+                continue
+            result = process_single_article(storage, article, dry_run=dry_run)
+            if result.ok:
+                success += 1
+            else:
+                failures.append({"article_id": job["article_id"], "error": result.error})
+        except Exception as e:
+            failures.append({"article_id": job["article_id"], "error": str(e)})
+    return {"ok": len(failures) == 0, "total": len(jobs), "success": success, "failures": failures}
+
+
 def _assemble_prompts_for_article(parsed_ara: dict) -> tuple[dict, str, str, str, bool]:
     """Extrae datos del ara_json y ensambla prompts. Retorna (prompts, tenor, volanta, titulo, requires_approval)."""
     meta = parsed_ara.get("meta_ara", {})
@@ -630,9 +670,11 @@ def main() -> None:
                     print(f"[Worker] {total_recovered} trabajos recuperados de estado atascado ({recovered_img} imagen, {recovered_vid} video)")
                 # Trabajos de imagen maestra
                 img = process_pending_image_jobs(storage, dry_run=dry_run)
+                # Trabajos que ya tienen imagen y necesitan video
+                vid = process_video_for_ready_image_jobs(storage, dry_run=dry_run)
                 # Trabajos de video nuevos
                 jobs = fetch_pending_jobs(storage)
-                print(f"[{datetime.now().isoformat()}] Pending video jobs: {len(jobs)} | image jobs: {img.get('success', 0)} ok | recovered: {total_recovered}")
+                print(f"[{datetime.now().isoformat()}] Pending video jobs: {len(jobs)} | image jobs: {img.get('success', 0)} ok | await-video: {vid.get('success', 0)} ok | recovered: {total_recovered}")
                 for job_art in jobs:
                     process_single_article(storage, job_art, dry_run=dry_run)
                     if not dry_run:
