@@ -44,11 +44,11 @@ class TestBatchWorkflowGenerator(unittest.TestCase):
     # Tests de generate_batch_json
     # -----------------------------------------------------------------------
 
-    def test_genera_dos_clips(self):
+    def test_genera_tres_clips(self):
         ara = self._make_ara_json()
         batch = bwg.generate_batch_json(ara_json_input=ara, article_id=901)
         jobs = batch.get("jobs", [])
-        self.assertEqual(len(jobs), 2, f"Se esperaban 2 jobs, se obtuvo: {[j['name'] for j in jobs]}")
+        self.assertEqual(len(jobs), 3, f"Se esperaban 3 jobs, se obtuvo: {[j['name'] for j in jobs]}")
 
     def test_jobs_tienen_tipo_video(self):
         ara = self._make_ara_json()
@@ -68,6 +68,19 @@ class TestBatchWorkflowGenerator(unittest.TestCase):
             f"Start de clip2 debe terminar en .mp4, obtuvo: {clip2['start']}"
         )
         self.assertIn(clip1_name, clip2["start"])
+
+    def test_encadenamiento_start_clip3(self):
+        ara = self._make_ara_json()
+        batch = bwg.generate_batch_json(ara_json_input=ara, article_id=901)
+        jobs = batch["jobs"]
+        clip2_name = jobs[1]["name"]
+        clip3 = jobs[2]
+        self.assertIn("start", clip3, "Clip 3 debería tener campo 'start' para continuidad")
+        self.assertTrue(
+            clip3["start"].endswith(".mp4"),
+            f"Start de clip3 debe terminar en .mp4, obtuvo: {clip3['start']}"
+        )
+        self.assertIn(clip2_name, clip3["start"])
 
     def test_nombres_unicos_por_articulo(self):
         ara = self._make_ara_json()
@@ -100,10 +113,10 @@ class TestBatchWorkflowGenerator(unittest.TestCase):
         self.assertIn("batch_", batch["project"])
 
     def test_n_clips_respeta_prompts_generados(self):
-        """Si el assembler genera N prompts, el batch JSON tiene N jobs."""
-        ara = self._make_ara_json()  # tiene 2 secciones -> 2 clips
-        batch = bwg.generate_batch_json(ara_json_input=ara, n_clips=5)  # pido 5 pero hay 2 secciones
-        self.assertEqual(len(batch["jobs"]), 2, "Deben generarse 2 jobs por las 2 secciones existentes")
+        """Si se pide n_clips=5, deben generarse 5 jobs aunque haya menos secciones."""
+        ara = self._make_ara_json()  # tiene 2 secciones
+        batch = bwg.generate_batch_json(ara_json_input=ara, n_clips=5)  # pido 5 clips
+        self.assertEqual(len(batch["jobs"]), 5, "Deben generarse 5 jobs cuando se solicita n_clips=5")
 
     # -----------------------------------------------------------------------
     # Tests de save_batch_json

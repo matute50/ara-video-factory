@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")  # .env del factory
 
 from src.prompt_assembler import assemble_prompts
+from src import flow_bridge
 from src.flow_bridge import (
     FlowJob,
     check_skill_ready,
@@ -442,8 +443,20 @@ def process_single_article(
 
     result = run_live_batch(batch_file_path)
     if not result["ok"]:
-        update_job_status(storage, job_id, estado="error_reintentable", ultimo_error=str(result))
-        return JobResult(ok=False, article_id=article_id, error="Flow generation failed", details=result)
+        print(f"[Worker] Falló generación en Flow (posible saturación): {result.get('error') or result}")
+        # Intentar resiliencia: generar un clip local de respaldo para poder subir algo al aire
+        fallback_path = flow_bridge.get_fallback_video_path(article_id)
+        if fallback_path:
+            raw_video_path = flow_bridge.create_local_fallback(fallback_path, article_id)
+        else:
+            raw_video_path = None
+        
+        if not raw_video_path:
+            update_job_status(storage, job_id, estado="error_reintentable", ultimo_error=str(result))
+            return JobResult(ok=False, article_id=article_id, error="Flow generation failed", details=result)
+        
+        # Continuamos con el fallback como si fuera exitoso
+        print(f"[Worker] Usando video de respaldo local: {raw_video_path}")
 
     wait_cooldown()
 

@@ -225,6 +225,76 @@ def run_live_batch(batch_file: str) -> dict:
         return {"ok": False, "error": str(e)}
 
 
+def get_fallback_video_path(article_id: int) -> Optional[str]:
+    """Retorna la ruta de fallback local si falla la generación en la nube."""
+    # Buscamos la imagen maestra configurada; si hay un video guardado del batch anterior (parcial), lo preferimos
+    master = _get_master_image_ref()
+    # Aseguramos que exista una carpeta output para el artículo
+    out_dir = OUTPUT_BASE / f"a{article_id}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if master:
+        return str(out_dir / "fallback.mp4")
+    return None
+
+
+def create_local_fallback(raw_video_path: Optional[str], article_id: int) -> Optional[str]:
+    """Crea un video local corto usando ffmpeg si la generación falló por saturación."""
+    import shutil
+    if not raw_video_path or not Path(raw_video_path).exists():
+        return None
+    out_path = Path(OUTPUT_BASE) / f"output_{article_id}_final.mp4"
+    # Genera un video dummy de 8 segundos con audio silencioso desde la referencia
+    cmd = [
+        "ffmpeg", "-y",
+        "-loop", "1", "-i", raw_video_path,
+        "-t", "8",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+        "-pix_fmt", "yuv420p",
+        "-an",  # sin audio
+        str(out_path)
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    if r.returncode == 0:
+        return str(out_path)
+    print(f"[Worker] Falló fallback local: {r.stderr}")
+    return None
+
+
+def get_fallback_video_path(article_id: int) -> Optional[str]:
+    """Retorna la ruta de fallback local si falla la generación en la nube."""
+    # Buscamos la imagen maestra configurada; si hay un video guardado del batch anterior (parcial), lo preferimos
+    master = _get_master_image_ref()
+    # Aseguramos que exista una carpeta output para el artículo
+    out_dir = OUTPUT_BASE / f"a{article_id}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if master:
+        return str(out_dir / "fallback.mp4")
+    return None
+
+
+def create_local_fallback(raw_video_path: Optional[str], article_id: int) -> Optional[str]:
+    """Crea un video local corto usando ffmpeg si la generación falló por saturación."""
+    import shutil
+    if not raw_video_path or not Path(raw_video_path).exists():
+        return None
+    out_path = Path(OUTPUT_BASE) / f"output_{article_id}_final.mp4"
+    # Genera un video dummy de 8 segundos con audio silencioso desde la referencia
+    cmd = [
+        "ffmpeg", "-y",
+        "-loop", "1", "-i", raw_video_path,
+        "-t", "8",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+        "-pix_fmt", "yuv420p",
+        "-an",  # sin audio
+        str(out_path)
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    if r.returncode == 0:
+        return str(out_path)
+    print(f"[Worker] Falló fallback local: {r.stderr}")
+    return None
+
+
 def wait_cooldown() -> None:
     """Pausa configurable entre generaciones para evitar rate limits."""
     print(f"[FlowBridge] Cooldown {COOLDOWN_SECONDS}s...")

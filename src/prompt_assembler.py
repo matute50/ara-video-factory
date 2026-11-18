@@ -388,12 +388,14 @@ def assemble_prompts_multi_clip(
         f"sin carteles ni letreros con texto visible en la escena."
     )
 
-    if not sections and guion_completo:
-        # Fallback: dividir guion completo en EXACTAMENTE n_clips secciones
+    # Asegurar que siempre tengamos EXACTAMENTE n_clips secciones
+    if len(sections) < n_clips and guion_completo:
+        # Dividir guion completo en EXACTAMENTE n_clips secciones
         all_words = guion_completo.split()
         total_words = len(all_words)
         words_per_clip = max(8, (total_words + n_clips - 1) // n_clips)  # Mínimo 8 palabras por clip
         
+        new_sections = []
         for i in range(n_clips):
             start = i * words_per_clip
             end = min(start + words_per_clip, total_words)
@@ -420,7 +422,9 @@ def assemble_prompts_multi_clip(
             if not s:
                 s = "Continuación de la noticia."
             
-            sections.append(s)
+            new_sections.append(s)
+        
+        sections = new_sections
 
     for idx, seccion_text in enumerate(sections[:n_clips]):
         errors = []
