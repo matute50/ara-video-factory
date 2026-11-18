@@ -106,6 +106,75 @@ def _fetch_article(storage: StorageAgent, article_id: int) -> Optional[dict]:
     return None
 
 
+def recover_stuck_jobs(storage: StorageAgent, max_age_minutes: int = 30) -> int:
+    """Reinicia trabajos atrapados en estados intermedios hace más de max_age_minutes."""
+    now = datetime.now().replace(tzinfo=None)  # naive para comparar
+    recovered = 0
+    for estado_target in ("generando_imagen", "pendiente_ensamblado"):
+        resp = _req.get(
+            f"{storage.url}/rest/v1/ara_video_jobs",
+            params={
+                "select": "id,article_id,estado,created_at",
+                "estado": f"eq.{estado_target}",
+                "order": "created_at.asc",
+            },
+            headers=storage.get_headers(False),
+            timeout=15,
+        )
+        if resp.status_code != 200 or not resp.json():
+            continue
+        for job in resp.json():
+            try:
+                raw = job["created_at"].replace("Z", "+00:00")
+                created = datetime.fromisoformat(raw).replace(tzinfo=None)
+                age_minutes = (now - created).total_seconds() / 60
+                if age_minutes > max_age_minutes:
+                    print(f"[Worker] Recovering stuck job #{job['id']} (art {job['article_id']}, estado={job['estado']}, age={age_minutes:.0f}min)")
+                    update_job_status(
+                        storage, job["id"],
+                        estado="pendiente_ensamblado",
+                        ultimo_error=f"recovery_timeout:{age_minutes:.0f}min",
+                    )
+                    recovered += 1
+            except Exception as e:
+                print(f"[Worker] Error recovering job {job['id']}: {e}")
+    return recovered
+
+
+def recover_stuck_video_jobs(storage: StorageAgent, max_age_minutes: int = 30) -> int:
+    """Recupera y reinicia trabajos de video atascados en pendiente_ensamblado."""
+    now = datetime.now().replace(tzinfo=None)  # naive para comparar
+    recovered = 0
+    resp = _req.get(
+        f"{storage.url}/rest/v1/ara_video_jobs",
+        params={
+            "select": "id,article_id,estado,created_at",
+            "estado": "eq.pendiente_ensamblado",
+            "order": "created_at.asc",
+        },
+        headers=storage.get_headers(False),
+        timeout=15,
+    )
+    if resp.status_code != 200 or not resp.json():
+        return 0
+    for job in resp.json():
+        try:
+            raw = job["created_at"].replace("Z", "+00:00")
+            created = datetime.fromisoformat(raw).replace(tzinfo=None)
+            age_minutes = (now - created).total_seconds() / 60
+            if age_minutes > max_age_minutes:
+                print(f"[Worker] Recovering stuck video job #{job['id']} (art {job['article_id']}, age={age_minutes:.0f}min)")
+                update_job_status(
+                    storage, job["id"],
+                    estado="pendiente_imagen",
+                    ultimo_error=f"recovery_timeout:{age_minutes:.0f}min",
+                )
+                recovered += 1
+        except Exception as e:
+            print(f"[Worker] Error recovering video job {job['id']}: {e}")
+    return recovered
+
+
 def fetch_pending_jobs(storage: StorageAgent, limit: int = 5) -> list[dict]:
     """Trae artículos con ara_json NO NULL que aún no tengan job en ara_video_jobs."""
     resp = _req.get(
@@ -142,12 +211,11 @@ def fetch_pending_jobs(storage: StorageAgent, limit: int = 5) -> list[dict]:
 
 
 def fetch_pending_image_jobs(storage: StorageAgent, limit: int = 5) -> list[dict]:
-    """Trae trabajos de IMAGEN maestra pendientes (tipo='imagen', estado='pendiente_imagen')."""
+    """Trae trabajos de IMAGEN maestra pendientes (estado='pendiente_imagen')."""
     resp = _req.get(
         f"{storage.url}/rest/v1/ara_video_jobs",
         params={
             "select": "id,article_id",
-            "tipo": "eq.imagen",
             "estado": "eq.pendiente_imagen",
             "order": "created_at.desc",
             "limit": str(limit),
@@ -554,11 +622,17 @@ def main() -> None:
         print(f"Polling cada {POLL_INTERVAL_MINUTES} minutos...")
         while True:
             try:
+                # Recuperar trabajos atrapados
+                recovered_img = recover_stuck_jobs(storage, max_age_minutes=30)
+                recovered_vid = recover_stuck_video_jobs(storage, max_age_minutes=30)
+                total_recovered = recovered_img + recovered_vid
+                if total_recovered:
+                    print(f"[Worker] {total_recovered} trabajos recuperados de estado atascado ({recovered_img} imagen, {recovered_vid} video)")
                 # Trabajos de imagen maestra
                 img = process_pending_image_jobs(storage, dry_run=dry_run)
-                # Trabajos de video
+                # Trabajos de video nuevos
                 jobs = fetch_pending_jobs(storage)
-                print(f"[{datetime.now().isoformat()}] Pending video jobs: {len(jobs)} | image jobs: {img.get('success', 0)} ok")
+                print(f"[{datetime.now().isoformat()}] Pending video jobs: {len(jobs)} | image jobs: {img.get('success', 0)} ok | recovered: {total_recovered}")
                 for job_art in jobs:
                     process_single_article(storage, job_art, dry_run=dry_run)
                     if not dry_run:
