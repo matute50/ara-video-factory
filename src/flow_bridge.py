@@ -235,13 +235,13 @@ def _generate_fallback_for_article(article_id: int, n_clips: int = 3) -> list[st
     clips: list[str] = []
     for i in range(n_clips):
         clip_path = str(out_dir / f"clip{i+1}_fallback.mp4")
+        # La imagen maestra ya está en 9:16 (1080x1920), no se necesita escalado
         cmd = [
             "ffmpeg", "-y",
             "-loop", "1", "-i", master,
             "-t", "8",
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
             "-pix_fmt", "yuv420p",
-            "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
             "-an",
             clip_path,
         ]
