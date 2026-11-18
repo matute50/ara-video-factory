@@ -317,7 +317,11 @@ def generate_multi_clip_batch(article_data: dict) -> dict:
         json.dump(ara_result, f, indent=2, ensure_ascii=False)
 
     c = ara_result.get("contenido", {})
-    has_split = bool(c.get("seccion_a_guion") and c.get("seccion_b_guion"))
+    bloques = c.get("bloques", [])
+    has_split = bool(
+        (c.get("seccion_a_guion") and c.get("seccion_b_guion"))
+        or (isinstance(bloques, list) and len(bloques) >= 2)
+    )
     if not has_split:
         return {
             "ok": False,
