@@ -225,73 +225,54 @@ def run_live_batch(batch_file: str) -> dict:
         return {"ok": False, "error": str(e)}
 
 
-def get_fallback_video_path(article_id: int) -> Optional[str]:
-    """Retorna la ruta de fallback local si falla la generación en la nube."""
-    # Buscamos la imagen maestra configurada; si hay un video guardado del batch anterior (parcial), lo preferimos
+def _generate_fallback_for_article(article_id: int, n_clips: int = 3) -> list[str]:
+    """Genera clips locales fallback usando la imagen maestra cuando Flow falla."""
     master = _get_master_image_ref()
-    # Aseguramos que exista una carpeta output para el artículo
+    if not master or not Path(master).exists():
+        return []
     out_dir = OUTPUT_BASE / f"a{article_id}"
     out_dir.mkdir(parents=True, exist_ok=True)
-    if master:
-        return str(out_dir / "fallback.mp4")
-    return None
+    clips: list[str] = []
+    for i in range(n_clips):
+        clip_path = str(out_dir / f"clip{i+1}_fallback.mp4")
+        cmd = [
+            "ffmpeg", "-y",
+            "-loop", "1", "-i", master,
+            "-t", "8",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+            "-pix_fmt", "yuv420p",
+            "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
+            "-an",
+            clip_path,
+        ]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if r.returncode == 0 and Path(clip_path).exists():
+            clips.append(clip_path)
+        else:
+            print(f"[FlowBridge] Fallback clip {i+1} falló: {r.stderr[:200]}")
+            break
+    return clips
 
 
-def create_local_fallback(raw_video_path: Optional[str], article_id: int) -> Optional[str]:
-    """Crea un video local corto usando ffmpeg si la generación falló por saturación."""
-    import shutil
-    if not raw_video_path or not Path(raw_video_path).exists():
+def assemble_fallback_batch(batch_file: str, article_id: int, n_clips: int = 3) -> Optional[str]:
+    """Cuando Flow falla, ensambla los clips fallback y devuelve la ruta del video final."""
+    clips = _generate_fallback_for_article(article_id, n_clips)
+    if not clips:
         return None
-    out_path = Path(OUTPUT_BASE) / f"output_{article_id}_final.mp4"
-    # Genera un video dummy de 8 segundos con audio silencioso desde la referencia
+    final = str(OUTPUT_BASE / f"output_{article_id}_final.mp4")
+    # Concatenar clips
+    with open("/tmp/fallback_concat.txt", "w") as f:
+        for c in clips:
+            f.write(f"file '{c}'\n")
     cmd = [
-        "ffmpeg", "-y",
-        "-loop", "1", "-i", raw_video_path,
-        "-t", "8",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
-        "-pix_fmt", "yuv420p",
-        "-an",  # sin audio
-        str(out_path)
+        "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+        "-i", "/tmp/fallback_concat.txt",
+        "-c", "copy", final,
     ]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    if r.returncode == 0:
-        return str(out_path)
-    print(f"[Worker] Falló fallback local: {r.stderr}")
-    return None
-
-
-def get_fallback_video_path(article_id: int) -> Optional[str]:
-    """Retorna la ruta de fallback local si falla la generación en la nube."""
-    # Buscamos la imagen maestra configurada; si hay un video guardado del batch anterior (parcial), lo preferimos
-    master = _get_master_image_ref()
-    # Aseguramos que exista una carpeta output para el artículo
-    out_dir = OUTPUT_BASE / f"a{article_id}"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    if master:
-        return str(out_dir / "fallback.mp4")
-    return None
-
-
-def create_local_fallback(raw_video_path: Optional[str], article_id: int) -> Optional[str]:
-    """Crea un video local corto usando ffmpeg si la generación falló por saturación."""
-    import shutil
-    if not raw_video_path or not Path(raw_video_path).exists():
-        return None
-    out_path = Path(OUTPUT_BASE) / f"output_{article_id}_final.mp4"
-    # Genera un video dummy de 8 segundos con audio silencioso desde la referencia
-    cmd = [
-        "ffmpeg", "-y",
-        "-loop", "1", "-i", raw_video_path,
-        "-t", "8",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
-        "-pix_fmt", "yuv420p",
-        "-an",  # sin audio
-        str(out_path)
-    ]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    if r.returncode == 0:
-        return str(out_path)
-    print(f"[Worker] Falló fallback local: {r.stderr}")
+    if r.returncode == 0 and Path(final).exists():
+        return final
+    print(f"[FlowBridge] Ensamble fallback falló: {r.stderr[:200]}")
     return None
 
 

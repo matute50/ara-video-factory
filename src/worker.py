@@ -444,19 +444,14 @@ def process_single_article(
     result = run_live_batch(batch_file_path)
     if not result["ok"]:
         print(f"[Worker] Falló generación en Flow (posible saturación): {result.get('error') or result}")
-        # Intentar resiliencia: generar un clip local de respaldo para poder subir algo al aire
-        fallback_path = flow_bridge.get_fallback_video_path(article_id)
-        if fallback_path:
-            raw_video_path = flow_bridge.create_local_fallback(fallback_path, article_id)
+        # Intentar resiliencia: generar clips locales fallback para poder subir algo al aire
+        fallback_final = flow_bridge.assemble_fallback_batch(batch_file_path, article_id, n_clips=parsed_ara.get("n_clips", 3))
+        if fallback_final and Path(fallback_final).exists():
+            raw_video_path = fallback_final
+            print(f"[Worker] Usando video de respaldo local: {raw_video_path}")
         else:
-            raw_video_path = None
-        
-        if not raw_video_path:
             update_job_status(storage, job_id, estado="error_reintentable", ultimo_error=str(result))
-            return JobResult(ok=False, article_id=article_id, error="Flow generation failed", details=result)
-        
-        # Continuamos con el fallback como si fuera exitoso
-        print(f"[Worker] Usando video de respaldo local: {raw_video_path}")
+            return JobResult(ok=False, article_id=article_id, error="Flow generation failed + fallback failed", details=result)
 
     wait_cooldown()
 
