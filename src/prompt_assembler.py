@@ -153,7 +153,7 @@ def assemble_prompts(
         errors.append(f"'guion_ara' muy largo ({_word_count(guion)} palabras, máximo 45)")
 
     # ---- Prompt IMAGEN (9:16 vertical) ----
-    persona_marker = "@Ara" if FLOW_USE_CHARACTER and FLOW_BASE_IMAGE_REF else "periodista femenino profesional"
+    persona_marker = "@Ara" if FLOW_USE_CHARACTER else "periodista femenino profesional"
     tenor_lighting_map = {
         "sensible_luto": "Iluminación natural tenue, sombras suaves, atmósfera sobria",
         "policial_grave": "Iluminación natural diurna moderada, realismo periodístico",
@@ -177,8 +177,8 @@ def assemble_prompts(
     except Exception:
         pass
     imagen_refs = (
-        f"Referencia visual: foto de {persona_marker} combinada con fotos reales del centro de Saladillo ({SALADILLO_PHOTO_DIR}). "
-        if FLOW_USE_CHARACTER and FLOW_BASE_IMAGE_REF
+        f"Referencia visual: {persona_marker}. "
+        if FLOW_USE_CHARACTER
         else ""
     )
     # Usar descripción fija del personaje cuando no hay 'continuidad_visual' explícita
@@ -338,7 +338,7 @@ def assemble_prompts_multi_clip(
     lenguaje_corporal = meta.get("lenguaje_corporal", "postura_firme_contenida")
     ritmo_camara = meta.get("ritmo_camara", "plano_fijo_estable")
 
-    persona_marker = "@Ara" if FLOW_USE_CHARACTER and FLOW_BASE_IMAGE_REF else "periodista femenino profesional"
+    persona_marker = "@Ara" if FLOW_USE_CHARACTER else "periodista femenino profesional"
     tenor_lighting_map = {
         "sensible_luto": "Iluminación natural tenue, sombras suaves, atmósfera sobria",
         "policial_grave": "Iluminación natural diurna moderada, realismo periodístico",
@@ -353,8 +353,8 @@ def assemble_prompts_multi_clip(
         else "vestimenta profesional sobria"
     )
     imagen_refs = (
-        f"Referencia visual: foto de {persona_marker} combinada con fotos reales del centro de Saladillo ({SALADILLO_PHOTO_DIR}). "
-        if FLOW_USE_CHARACTER and FLOW_BASE_IMAGE_REF
+        f"Referencia visual: {persona_marker}. "
+        if FLOW_USE_CHARACTER
         else ""
     )
     # Nota genérica de look cuando no hay continuidad explícita en meta_ara (v1.0)
