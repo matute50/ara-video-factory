@@ -568,12 +568,16 @@ def process_single_article(
         json.dump(batch_payload, f, indent=2, ensure_ascii=False)
 
     result = run_live_batch(batch_file_path)
+    fallback_used = False
+    batch_report: Optional[list[dict]] = None
+    raw_video_path: Optional[str] = None
     if not result["ok"]:
         print(f"[Worker] Falló generación en Flow (posible saturación): {result.get('error') or result}")
         # Intentar resiliencia: generar clips locales fallback para poder subir algo al aire
         fallback_final = flow_bridge.assemble_fallback_batch(batch_file_path, article_id, n_clips=parsed_ara.get("n_clips", 3))
         if fallback_final and Path(fallback_final).exists():
             raw_video_path = fallback_final
+            fallback_used = True
             print(f"[Worker] Usando video de respaldo local: {raw_video_path}")
         else:
             update_job_status(storage, job_id, estado="error_reintentable", ultimo_error=str(result))
@@ -581,8 +585,9 @@ def process_single_article(
 
     wait_cooldown()
 
-    batch_report = _read_batch_report()
-    raw_video_path = _find_generated_file(batch_report, "video")
+    if not fallback_used:
+        batch_report = _read_batch_report()
+        raw_video_path = _find_generated_file(batch_report, "video")
 
     if not raw_video_path or not Path(raw_video_path).exists():
         print("[Worker] Video crudo de Flow no encontrado, usando testsrc como fallback.")
