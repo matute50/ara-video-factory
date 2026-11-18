@@ -12,3 +12,4 @@ vendor/
 .pytest_cache/
 .mypy_cache/
 .DS_Store
+output/*.mp4
