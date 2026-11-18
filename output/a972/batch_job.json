@@ -1,0 +1,27 @@
+{
+  "project": "a972",
+  "defaults": {
+    "ratio": "9:16",
+    "video_model": "Veo 3.1 - Lite"
+  },
+  "jobs": [
+    {
+      "type": "video",
+      "name": "a972_clip1",
+      "prompt": "[@Ara dice \"Vivo.\", femenina joven, tono claro cálido y expresivo, español argentino rioplatense, sincronización labial precisa]; Expressive style: initial=Mirá fija al lente con leve asentimiento inicial, expresión abierta y cercana; development=mano visible de forma controlada, expresa datos con seriedad contenida, mantiene contacto visual constante; closing=mano visible de forma controlada, expresa datos con seriedad contenida, mantiene contacto visual constante; body_language=postura_firme_contenida; camera_rhythm=micro_acercamiento_suave; Scene is an outdoor real street setting, NEVER a studio set; NO visible text signs, posters, or graphics.; [Fondo: Sonido de calle céntrica de Saladillo acorde al tenor, volumen bajo o muy bajo]",
+      "start": "/home/matias/ara-video-factory/reference_videos/ara_raw/ara_frontal_init.jpg"
+    },
+    {
+      "type": "video",
+      "name": "a972_clip2",
+      "prompt": "[@Ara dice \"en las próximas horas.\", femenina joven, tono claro cálido y expresivo, español argentino rioplatense, sincronización labial precisa]; ; continuity:Keep EXACTLY the visual continuity described: Mujer joven con cabello rizado natural negro, suelto o con accesorios (diadema o clip), pelo afro con volumen definido, vestimenta casual (jeans y remera o campera liviana), maquillaje natural, iluminación natural frontal desde la izquierda, locación: vereda frente a la plaza central de Saladillo con árboles y edificios coloniales al fondo. Only change lip movement and facial expression to match the new dialogue.; [Fondo: Sonido de calle céntrica de Saladillo acorde al tenor, volumen bajo o muy bajo]",
+      "start": "a972_clip1.mp4"
+    },
+    {
+      "type": "video",
+      "name": "a972_clip3",
+      "prompt": "[@Ara dice \"en las próximas horas. Más detalles sobre.\", femenina joven, tono claro cálido y expresivo, español argentino rioplatense, sincronización labial precisa]; ; continuity:Keep EXACTLY the visual continuity described: Mujer joven con cabello rizado natural negro, suelto o con accesorios (diadema o clip), pelo afro con volumen definido, vestimenta casual (jeans y remera o campera liviana), maquillaje natural, iluminación natural frontal desde la izquierda, locación: vereda frente a la plaza central de Saladillo con árboles y edificios coloniales al fondo. Only change lip movement and facial expression to match the new dialogue.; [Fondo: Sonido de calle céntrica de Saladillo acorde al tenor, volumen bajo o muy bajo]",
+      "start": "a972_clip2.mp4"
+    }
+  ]
+}

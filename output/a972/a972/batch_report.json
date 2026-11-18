@@ -1,0 +1,30 @@
+[
+  {
+    "name": "a972_clip1",
+    "type": "video",
+    "ok": false,
+    "submitted": true,
+    "frames": [
+      {
+        "slot": "initial",
+        "file": "/home/matias/ara-video-factory/reference_videos/ara_raw/ara_frontal_init.jpg",
+        "asset_id": "19747720-ba8d-4226-8e80-1e40f6fb2c53"
+      }
+    ],
+    "error": "Generación de video falló 1 veces seguidas. Flow reporta: 'No se pudo generar' (suele ser saturación)."
+  },
+  {
+    "name": "a972_clip2",
+    "type": "video",
+    "ok": false,
+    "submitted": false,
+    "error": "Missing frame file: a972_clip1.mp4"
+  },
+  {
+    "name": "a972_clip3",
+    "type": "video",
+    "ok": false,
+    "submitted": false,
+    "error": "Missing frame file: a972_clip2.mp4"
+  }
+]
