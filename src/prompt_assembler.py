@@ -305,7 +305,7 @@ def _extract_continuidad_visual(ara_json_input) -> str:
 
 def assemble_prompts_multi_clip(
     ara_json_input,
-    n_clips: int = 2,
+    n_clips: int = 3,
     duracion_por_clip: float = 8.0,
 ) -> list[dict]:
     """
@@ -389,25 +389,37 @@ def assemble_prompts_multi_clip(
     )
 
     if not sections and guion_completo:
-        # Fallback: dividir guion completo en n_clips mitades
+        # Fallback: dividir guion completo en EXACTAMENTE n_clips secciones
         all_words = guion_completo.split()
-        per_clip = max(14, len(all_words) // n_clips)
+        total_words = len(all_words)
+        words_per_clip = max(8, (total_words + n_clips - 1) // n_clips)  # Mínimo 8 palabras por clip
+        
         for i in range(n_clips):
-            start = i * per_clip
-            end = min(start + per_clip, len(all_words))
+            start = i * words_per_clip
+            end = min(start + words_per_clip, total_words)
+            
+            # Si nos quedamos sin palabras, repetir las últimas
+            if start >= total_words:
+                start = total_words - words_per_clip if total_words >= words_per_clip else 0
+                end = total_words
+            
             s = ' '.join(all_words[start:end]).rstrip()
-            if not s.endswith('.') and end < len(all_words):
-                # Buscar frontera de oración cercana
-                for j in range(end, min(end + 5, len(all_words))):
-                    cand = ' '.join(all_words[start:j+1]).rstrip()
-                    if cand.endswith('.'):
-                        s = cand
-                        end = j + 1
-                        break
-                else:
-                    s += '.'
-            elif not s.endswith('.'):
+            
+            # Asegurar que termine en punto si tiene sentido
+            if s and not s.endswith('.') and end < total_words:
+                # Buscar siguiente punto
+                rest = ' '.join(all_words[end:])
+                dot_pos = rest.find('.')
+                if dot_pos > 0:
+                    s = rest[:dot_pos+1]
+            
+            if not s.endswith('.') and s:
                 s += '.'
+            
+            # Si la sección quedó vacía, usar una frase genérica
+            if not s:
+                s = "Continuación de la noticia."
+            
             sections.append(s)
 
     for idx, seccion_text in enumerate(sections[:n_clips]):
@@ -419,8 +431,17 @@ def assemble_prompts_multi_clip(
         elif _word_count(seccion_text) > 25:
             errors.append(f"Clip {idx+1}: sección muy larga ({_word_count(seccion_text)} palabras, máx 25)")
 
-        # Prompt imagen: idéntico para todos los clips (mismo personaje/escenario)
-        prompt_imagen = base_imagen_prompt
+        # Planos dinámicos por índice de clip (American shot -> Medium Close Up -> Medium Shot)
+        if idx == 0:
+            shot_type = "Plano americano, plano medio largo desde cintura/muslos arriba, mostrando entorno urbano completo."
+        elif idx == 1:
+            shot_type = "Plano medio corto, encuadre desde pecho arriba."
+        else:
+            shot_type = "Plano medio, encuadre clásico de noticiero desde cintura arriba."
+        prompt_imagen = base_imagen_prompt.replace(
+            "Vertical 9:16. Close-up medio de",
+            f"Vertical 9:16. {shot_type} de"
+        )
 
         # Prompt video
         cierre_desc = expresion_cierre if idx == len(sections) - 1 else expresion_desarrollo
@@ -497,7 +518,7 @@ def assemble_prompts_multi_clip(
 
 def build_batch_json_for_multi_clip(
     ara_json_input,
-    n_clips: int = 2,
+    n_clips: int = 3,
     duracion_por_clip: float = 8.0,
     project_name: str = "",
 ) -> dict:

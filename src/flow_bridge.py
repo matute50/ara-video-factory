@@ -179,22 +179,32 @@ def dry_run_batch(batch_payload: dict) -> dict:
     print(f"[FlowBridge DRY-RUN] Video model: {VIDEO_MODEL}")
     print(f"[FlowBridge DRY-RUN] Duración objetivo: 8s")
     print(f"[FlowBridge DRY-RUN] Entries: {len(batch_payload['jobs'])}")
-    print("\n─── PROMPT IMAGEN ───")
-    img_job = next(j for j in batch_payload["jobs"] if j["type"] == "image")
-    print(img_job["prompt"])
-    print("\n─── PROMPT VIDEO ───")
-    vid_job = next(j for j in batch_payload["jobs"] if j["type"] == "video")
-    print(vid_job["prompt"])
+    
+    # Soporte para modo multi-clip (solo videos) o modo legacy (imagen + video)
+    img_jobs = [j for j in batch_payload["jobs"] if j.get("type") == "image"]
+    vid_jobs = [j for j in batch_payload["jobs"] if j.get("type") == "video"]
+    
+    if img_jobs:
+        print("\n─── PROMPT IMAGEN ───")
+        print(img_jobs[0]["prompt"])
+    
+    if vid_jobs:
+        print("\n─── PROMPT VIDEO ───")
+        for i, vid_job in enumerate(vid_jobs, 1):
+            print(f"[Clip {i}] {vid_job['prompt']}")
+    
     print(f"\n─── RESUMEN ───")
-    print(f"Word count prompt_veo: {len(vid_job['prompt'].split())}")
+    print(f"Total jobs: {len(batch_payload['jobs'])} ({len(img_jobs)} imagen, {len(vid_jobs)} video)")
+    if vid_jobs:
+        print(f"Word count prompt_veo (clip 1): {len(vid_jobs[0]['prompt'].split())}")
     return {
         "dry_run": True,
         "batch_file": batch_file,
         "project": PROJECT_NAME,
         "entries_count": len(batch_payload["jobs"]),
         "video_model": VIDEO_MODEL,
-        "image_prompt_wordcount": len(img_job["prompt"].split()),
-        "video_prompt_wordcount": len(vid_job["prompt"].split()),
+        "image_prompt_wordcount": len(img_jobs[0]["prompt"].split()) if img_jobs else 0,
+        "video_prompt_wordcount": len(vid_jobs[0]["prompt"].split()) if vid_jobs else 0,
         "status": "ready_for_real_run_if_login_active",
     }
 

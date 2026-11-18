@@ -20,7 +20,7 @@ from prompt_assembler import assemble_prompts_multi_clip  # noqa: E402
 def generate_batch_json(
     ara_json_input,
     article_id: Optional[int] = None,
-    n_clips: int = 2,
+    n_clips: int = 3,
     duracion_por_clip: float = 8.0,
     project_name: Optional[str] = None,
 ) -> dict:
@@ -134,7 +134,7 @@ if __name__ == "__main__":
     parser.add_argument("--input", required=True, help="Path a ara_json")
     parser.add_argument("--article-id", type=int, default=None, help="ID del artículo")
     parser.add_argument("--output", required=True, help="Ruta de salida del JSON")
-    parser.add_argument("--n-clips", type=int, default=2, help="Cantidad de clips (default: 2)")
+    parser.add_argument("--n-clips", type=int, default=3, help="Cantidad de clips (default: 3)")
     args = parser.parse_args()
 
     with open(args.input, encoding="utf-8") as f:

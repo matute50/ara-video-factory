@@ -26,7 +26,6 @@ from src.flow_bridge import (
     FlowJob,
     check_skill_ready,
     dry_run_batch,
-    generate_batch_json,
     generate_image_only_json,
     run_live_batch,
     wait_cooldown,
@@ -34,6 +33,8 @@ from src.flow_bridge import (
     SKILL_DIR,
     PROJECT_NAME,
 )
+# Importar el generador unificado de batch multi-clip
+from src.batch_workflow_generator import generate_batch_json as generate_multi_clip_batch
 from src.ffmpeg_composer import process_video as compose_video
 from src.telegram_notifier import QCPayload, send_qc_request, notify_batch_complete
 from src.google_drive_uploader import upload_video_to_drive
@@ -406,7 +407,12 @@ def process_single_article(
             prompt_veo=prompts["prompt_veo"],
             estado_actual="generando_imagen",
         )
-        batch_payload = generate_batch_json(job_flow)
+        # Usar nueva rutina de 3 clips (Plano americano -> Medio corto -> Medio)
+        batch_payload = generate_multi_clip_batch(
+            ara_json_input=parsed_ara,
+            article_id=article_id,
+            n_clips=3,
+        )
         result = dry_run_batch(batch_payload)
         update_job_status(storage, job_id, estado="aprobado", batch_report_json=result)
         return JobResult(
@@ -421,24 +427,16 @@ def process_single_article(
             batch_report=result,
         )
 
-    # LIVE MODE
-    return _process_live(storage, job_id, article_id, prompts, parsed_ara, volanta, titulo, tenor)
-
-
-def _process_live(
-    storage: StorageAgent,
-    job_id: int,
-    article_id: int,
-    prompts: dict,
-    parsed_ara: dict,
-    volanta: str,
-    titulo: str,
-    tenor: str,
-) -> JobResult:
-    """Flujo completo live: imagen → video → FFmpeg → Telegram delivery."""
-    job = FlowJob(job_id, article_id, prompts["prompt_imagen"], prompts["prompt_veo"], "generando_imagen")
+    # LIVE MODE - Rutina de 3 clips dinámicos
     batch_file_path = str(OUTPUT_BASE / f"batch_job_{job_id}.json")
-    batch_payload = generate_batch_json(job)
+    
+    # Construir batch unificado de 3 clips con planos progresivos
+    batch_payload = generate_multi_clip_batch(
+        ara_json_input=parsed_ara,
+        article_id=article_id,
+        n_clips=3,
+    )
+    
     with open(batch_file_path, "w", encoding="utf-8") as f:
         json.dump(batch_payload, f, indent=2, ensure_ascii=False)
 

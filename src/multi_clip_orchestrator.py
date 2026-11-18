@@ -58,7 +58,7 @@ _PYTHON_BIN = _find_python_with_playwright()
 @dataclass
 class BatchConfig:
     """Configuración para la ejecución de batch en Flow."""
-    n_clips: int = 2
+    n_clips: int = 3
     duracion_por_clip: float = 8.0
     project_name: Optional[str] = None
     max_wait_seconds: int = 600
@@ -78,7 +78,7 @@ class MultiClipOrchestrator:
         output_dir: str = "output",
         volanta_text: str = "",
         titulo_text: str = "",
-        n_clips: int = 2,
+        n_clips: int = 3,
         brand_color: str = "#1E3A8A",
     ):
         self.article_id = article_id
@@ -332,7 +332,7 @@ def generate_multi_clip_batch(article_data: dict) -> dict:
         output_dir=str(OUTPUT_BASE),
         volanta_text=c.get("volanta_zocalo", ""),
         titulo_text=c.get("titulo_zocalo", ""),
-        n_clips=2,
+        n_clips=3,
     )
     result = orchestrator.run()
 
