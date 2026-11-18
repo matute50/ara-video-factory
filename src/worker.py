@@ -424,12 +424,12 @@ def process_pending_image_jobs(storage: StorageAgent, dry_run: bool = True, limi
 
 
 def fetch_pending_awaiting_video_jobs(storage: StorageAgent, limit: int = 5) -> list[dict]:
-    """Trae trabajos con imagen lista que aún no tienen video (estado='imagen_lista')."""
+    """Trae trabajos con imagen lista que aún no tienen video (estado='imagen_lista' o 'aprobado')."""
     resp = _req.get(
         f"{storage.url}/rest/v1/ara_video_jobs",
         params={
             "select": "id,article_id",
-            "estado": "eq.imagen_lista",
+            "or": "(estado.eq.imagen_lista,estado.eq.aprobado)",
             "master_image_url": "neq.null",
             "order": "created_at.asc",
             "limit": str(limit),
